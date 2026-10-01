@@ -20,6 +20,12 @@ Application React de gestion de budget personnel qui répond à une question sim
 - **Alerte découvert** : point le plus bas du mois mis en évidence si le solde devient négatif
 - **Persistance complète** : sauvegarde automatique dans le navigateur (localStorage), export / import JSON, réinitialisation, migration automatique des anciennes sauvegardes
 
+## 🌐 Version en ligne
+
+👉 **https://infoxpubs-eng.github.io/budget-perso/**
+
+L'application est publiée sur GitHub Pages, avec déploiement automatique à chaque push sur `main` (workflow `.github/workflows/deploy.yml`). Les données de chaque utilisateur restent dans son propre navigateur (localStorage) : rien n'est transmis à un serveur.
+
 ## Démarrage rapide
 
 ```bash
@@ -36,12 +42,14 @@ npm test          # lance la suite de tests (Vitest)
 ├── vite.config.js          # Vite + Tailwind CSS v4 + configuration Vitest
 ├── src/
 │   ├── main.jsx            # point d'entrée React
-│   ├── index.css           # import Tailwind
+│   ├── index.css           # impo
+rt Tailwind
 │   ├── App.jsx             # interface complète (onglets, graphiques, formulaires)
 │   └── lib/
 │       ├── budget.js       # logique métier pure (simulation, agrégats) — sans React
 │       └── budget.test.js  # tests unitaires Vitest de la logique métier
-└── .github/workflows/ci.yml  # CI : les tests tournent à chaque push
+├── .github/workflows/ci.yml     # CI : les tests tournent à chaque push
+└── .github/workflows/deploy.yml  # Déploiement GitHub Pages
 ```
 
 ## Logique métier (`src/lib/budget.js`)
@@ -76,7 +84,8 @@ Le modèle de données est volontairement simple :
 
 ## Tests
 
-La suite couvre : années bissextiles, tri et signe des opérations, exclusion des dépenses annuelles hors de leur mois, clamp du jour 31, jours de paie (dont franchissement de week-end), 13ᵉ mois en juin/novembre, bonus de mars, dépenses exceptionnelles, enchaînement des soldes d'un mois à l'autre, détection de découvert, passage à l'année suivante, migration des anciennes sauvegardes et agrégats incompressible/discrétionnaire.
+La suite couvre : années bissextiles, tri et signe des opérations, exclusion des dépenses annuelles hors de leur mois, clamp du jour 
+31, jours de paie (dont franchissement de week-end), 13ᵉ mois en juin/novembre, bonus de mars, dépenses exceptionnelles, enchaînement des soldes d'un mois à l'autre, détection de découvert, passage à l'année suivante, migration des anciennes sauvegardes et agrégats incompressible/discrétionnaire.
 
 ```bash
 npm test            # une seule exécution

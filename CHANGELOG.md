@@ -12,6 +12,14 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.2.1] — 2026-10-01
+
+### Ajouté
+
+- **Publication web via GitHub Pages** : déploiement automatique à chaque push sur `main` (workflow `.github/workflows/deploy.yml` — build puis mise en ligne de `dist`)
+- Base Vite `base: "/budget-perso/"` adaptée à l'hébergement GitHub Pages
+- Section « Version en ligne » dans le README
+
 ## [0.2.0] — 2026-10-01
 
 ### Ajouté
@@ -34,7 +42,8 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 ### Ajouté
 
 - Application « Budget prévisionnel » (React + Vite + Tailwind CSS v4) :
-  - Gestion des **dépenses récurrentes** : libellé, montant, jour de débit (1–31), catégorie (Domestiques, Habituelles, Sports & autres, Loisirs, Voyages), fréquence mensuelle ou annuelle
+  - Gestion des **dépen
+ses récurrentes** : libellé, montant, jour de débit (1–31), catégorie (Domestiques, Habituelles, Sports & autres, Loisirs, Voyages), fréquence mensuelle ou annuelle
   - Gestion des **revenus récurrents** avec date de crédit
   - **Graphique d'évolution du solde** jour par jour, avec détail des opérations au survol
   - **Flux quotidien** : barres vertes/rouges montrant à quel moment l'argent entre et sort
