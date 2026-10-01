@@ -1,0 +1,29 @@
+name: Tag release
+
+# À chaque push sur main : crée le tag v{version} (lu dans package.json)
+# s'il n'existe pas encore. Permet de suivre les versions publiées.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Créer le tag de version s'il manque
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "Version dans package.json : $VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION déjà présent — rien à faire."
+          else
+            git tag "v$VERSION"
+            git push origin "v$VERSION"
+            echo "Tag v$VERSION créé."
+          fi
