@@ -12,6 +12,18 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.5.0] — 2026-10-01
+
+### Ajouté
+
+- **Anti-doublons à l'import CSV** : une ligne du relevé qui correspond à une écriture déjà planifiée n'est plus importée en double
+  - Dépenses : même catégorie et sous-catégorie, même montant à 0,01 € près, mois compatible avec la fréquence (annuelle → le mois prévu uniquement) ; chaque écriture planifiée n'est consommée qu'une fois
+  - Revenus : même montant à 0,01 € près, catégorie bancaire comparée quand le revenu planifié en précise une ; les revenus « uniques » ne s'appliquent qu'à leur date prévue
+  - Le récapitulatif avant import affiche le nombre de lignes déjà planifiées (non importées), à côté des nouvelles dépenses / revenus
+- **Workflow « Tag release »** (`.github/workflows/tag-release.yml`) : à chaque push sur `main`, le tag `v{version}` (lu depuis `package.json`) est créé s'il n'existe pas encore
+- Nouvelles fonctions exportées dans `src/lib/import-csv.js` : `matchesPlannedExpense`, `matchesPlannedIncome` ; `rowsToEntries(rows, planned?)` accepte les écritures planifiées
+- 11 nouveaux tests (66 au total) : anti-doublons dépenses (mensuelle / annuelle / consommation unique), rapprochement revenus (fixe, salaire avec catégorie, unique à la date prévue)
+
 ## [0.4.0] — 2026-10-01
 
 ### Ajouté

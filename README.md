@@ -6,7 +6,7 @@ Application React de gestion de budget personnel qui répond à une question sim
 ## Fonctionnalités
 
 - **Nomenclature bancaire à 2 niveaux** : chaque dépense est classée par **catégorie** (Logement, Vie quotidienne, Loisirs, Voyages et Transports, Santé, Abonnements et téléphonie, Services financiers, Impôts et Taxes, Auto et Moto, Cadeaux et solidarité, Emprunts, Dépenses d'épargne, Frais professionnels, Virements, Retraits, Mouvements internes…) et **sous-catégorie** (issue du relevé bancaire)
-- **Import de relevé bancaire CSV** 🧾 : fichier d'export `Date transaction;…;Catégorie;Sous-Catégorie;Montant;Pointée;` — les débits deviennent des dépenses exceptionnelles à leur date réelle, les crédits des revenus uniques, avec rapprochement automatique des catégories et récapitulatif avant import
+- **Import de relevé bancaire CSV** 🧾 : fichier d'export `Date transaction;…;Catégorie;Sous-Catégorie;Montant;Pointée;` — les débits deviennent des dépenses exceptionnelles à leur date réelle, les crédits des revenus uniques, avec rapprochement automatique des catégories et récapitulatif avant import ; **anti-doublons** : une ligne correspondant à une écriture déjà planifiée (même catégorie/sous-catégorie, même montant à 0,01 € près, mois compatible) n'est pas importée en double
 - **Dépenses récurrentes** : montant, jour de débit (1–31), catégorie bancaire, fréquence mensuelle ou annuelle
 - **Dépenses exceptionnelles** : dépenses unitaires à date précise, catégorisées, intégrées à la simulation et au budget
 - **Dépenses incompressibles** 🔒 : marqueur sur chaque dépense, visualisation incompressible vs discrétionnaire
@@ -51,8 +51,9 @@ npm test          # lance la suite de tests (Vitest)
 │       ├── import-csv.js   # import de relevé bancaire CSV (parsing FR + rapprochement des catégories)
 │       ├── budget.test.js  # tests unitaires Vitest de la logique métier
 │       └── import-csv.test.js  # tests unitaires Vitest de l'import CSV
-├── .github/workflows/ci.yml      # CI : tests + build à chaque push
-└── .github/workflows/deploy.yml  # déploiement GitHub Pages à chaque push sur main
+├── .github/workflows/ci.yml           # CI : tests + build à chaque push
+├── .github/workflows/deploy.yml       # déploiement GitHub Pages à chaque push sur main
+└── .github/workflows/tag-release.yml  # tag v{version} créé à chaque push sur main
 ```
 
 ## Logique métier (`src/lib/budget.js`)
@@ -90,7 +91,8 @@ Module **sans dépendance React**, donc testable isolément :
 | `parseFrDate(s)` | Date au format `JJ/MM/AAAA` |
 | `parseFrAmount(s)` | Montant français (`-22,67` → `-22.67`) |
 | `parseCsv(text)` | Découpe le CSV (`;`, BOM, CRLF) en lignes de 6 colonnes |
-| `rowsToEntries(rows)` | Convertit en écritures : débits → dépenses exceptionnelles, crédits → revenus uniques ; rapproche catégorie et sous-catégorie par libellé normalisé, ignore et signale les lignes invalides |
+| `rowsToEntries(rows, planned?)` | Convertit en écritures : débits → dépenses exceptionnelles, crédits → revenus uniques ; rapproche catégorie et sous-catégorie par libellé normalisé, ignore et signale les lignes invalides ; une ligne identique à une écriture planifiée (`planned = { expenses, incomes }`) est comptée dans `recurrentes` au lieu d'être importée |
+| `matchesPlannedExpense`, `matchesPlannedIncome` | Rapprochement ligne / écriture planifiée (catégorie, sous-catégorie, montant ±0,01 €, fréquence) |
 
 Le modèle de données est volontairement simple :
 
@@ -110,14 +112,14 @@ Le modèle de données est volontairement simple :
 ## Tests
 
 La suite couvre : années bissextiles, tri et signe des opérations, exclusion des dépenses annuelles hors de leur mois, clamp du jour
-31, jours de paie (dont franchissement de week-end), 13ᵉ mois en juin/novembre, bonus de mars, dépenses exceptionnelles, revenus uniques (mode `unique`), enchaînement des soldes d'un mois à l'autre, détection de découvert, passage à l'année suivante, migration des anciennes sauvegardes (dont conversion des anciennes catégories plates), intégrité de la nomenclature bancaire, rattachement des enveloppes et agrégats incompressible/discrétionnaire ; parsing de l'import CSV (dates et montants français, BOM/CRLF, lignes invalides, rapprochement des libellés, conversion en écritures). **55 tests** au total.
+31, jours de paie (dont franchissement de week-end), 13ᵉ mois en juin/novembre, bonus de mars, dépenses exceptionnelles, revenus uniques (mode `unique`), enchaînement des soldes d'un mois à l'autre, détection de découvert, passage à l'année suivante, migration des anciennes sauvegardes (dont conversion des anciennes catégories plates), intégrité de la nomenclature bancaire, rattachement des enveloppes et agrégats incompressible/discrétionnaire ; parsing de l'import CSV (dates et montants français, BOM/CRLF, lignes invalides, rapprochement des libellés, conversion en écritures) ; anti-doublons de l'import (dépenses récurrentes mensuelles/annuelles, consommation unique d'une écriture, revenus fixe/salaire/unique). **66 tests** au total.
 
 ```bash
 npm test            # une seule exécution
 npm run test:watch  # mode watch
 ```
 
-Une GitHub Action (`.github/workflows/ci.yml`) exécute les tests à chaque push et pull request sur `main`.
+Une GitHub Action (`.github/workflows/ci.yml`) exécute les tests à chaque push et pull request sur `main`. Une autre (`.github/workflows/tag-release.yml`) crée le tag `v{version}` à chaque push sur `main`.
 
 ## Suivi du projet
 

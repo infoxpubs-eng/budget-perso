@@ -10,6 +10,9 @@
  *   ignorés ; une sous-catégorie inconnue reste importée sans sous-catégorie.
  * - Les lignes dont la catégorie est inconnue (ou la date / le montant
  *   illisibles) sont ignorées et comptées.
+ * - Les lignes correspondant à des écritures déjà planifiées (dépenses
+ *   récurrentes, revenus) ne sont pas importées en double : elles sont
+ *   comptées dans `recurrentes` (voir rowsToEntries).
  *
  * Chaque ligne devient :
  *   - dépense  → une dépense exceptionnelle (date précise) ;
@@ -146,15 +149,35 @@ function newId() {
  * Convertit les lignes analysées en entrées du modèle :
  * montants négatifs → dépenses exceptionnelles (extras), positifs → revenus uniques.
  *
- * @returns {{ extras: Array, incomes: Array, depensesTotal: number, revenusTotal: number }}
+ * `planned` (optionnel) décrit les écritures déjà planifiées dans l'état
+ * (`{ expenses, incomes }`). Toute ligne du relevé qui correspond à une
+ * écriture planifiée (même catégorie/sous-catégorie, même montant à 0,01 €
+ * près, mois compatible avec la fréquence) n'est PAS importée : elle est
+ * comptée dans `recurrentes` pour éviter un doublon dans le budget.
+ *
+ * @returns {{ extras: Array, incomes: Array, recurrentes: Array<{label:string,amount:number,kind:"depense"|"revenu"}>,
+ *            depensesTotal: number, revenusTotal: number }}
  */
-export function rowsToEntries(rows) {
+export function rowsToEntries(rows, planned = {}) {
+  const expenses = planned.expenses ?? [];
+  const incomesPlanned = planned.incomes ?? [];
   const extras = [];
   const incomes = [];
+  const recurrentes = [];
   let depensesTotal = 0;
   let revenusTotal = 0;
+  const usedExpenses = new Set();
+  const usedIncomes = new Set();
   for (const r of rows) {
     if (r.amount < 0) {
+      const e = expenses.find(
+        (x) => !usedExpenses.has(x.id) && matchesPlannedExpense(r, x)
+      );
+      if (e) {
+        usedExpenses.add(e.id);
+        recurrentes.push({ label: e.label, amount: -r.amount, kind: "depense" });
+        continue;
+      }
       extras.push({
         id: newId(),
         label: r.label,
@@ -167,6 +190,14 @@ export function rowsToEntries(rows) {
       });
       depensesTotal += -r.amount;
     } else {
+      const i = incomesPlanned.find(
+        (x) => !usedIncomes.has(x.id) && matchesPlannedIncome(r, x)
+      );
+      if (i) {
+        usedIncomes.add(i.id);
+        recurrentes.push({ label: i.label, amount: r.amount, kind: "revenu" });
+        continue;
+      }
       incomes.push({
         id: newId(),
         label: r.label,
@@ -181,5 +212,36 @@ export function rowsToEntries(rows) {
       revenusTotal += r.amount;
     }
   }
-  return { extras, incomes, depensesTotal, revenusTotal };
+  return { extras, incomes, recurrentes, depensesTotal, revenusTotal };
+}
+
+/**
+ * Tolérance (€) du rapprochement montant relevé / montant planifié.
+ */
+const TOL = 0.01;
+
+/**
+ * Une ligne de débit correspond-elle à une dépense récurrente déjà planifiée ?
+ * Même catégorie et sous-catégorie, même montant à 0,01 € près, et mois
+ * compatible avec la fréquence (mensuelle : tous les mois ; annuelle : le
+ * mois prévu uniquement).
+ */
+export function matchesPlannedExpense(row, e) {
+  if (e.cat !== row.cat) return false;
+  if ((e.sub ?? undefined) !== (row.sub ?? undefined)) return false;
+  if (Math.abs(e.amount - (-row.amount)) > TOL) return false;
+  return e.freq !== "annuelle" || (e.month ?? 1) - 1 === row.m;
+}
+
+/**
+ * Une ligne de crédit correspond-elle à un revenu déjà planifié ?
+ * Même montant à 0,01 € près ; la catégorie bancaire est comparée quand le
+ * revenu planifié en précise une. Revenus « fixe » / « salaire » : versés
+ * chaque mois ; « unique » : uniquement à la date prévue.
+ */
+export function matchesPlannedIncome(row, i) {
+  if (Math.abs(i.amount - row.amount) > TOL) return false;
+  if (i.cat && i.cat !== row.cat) return false;
+  if (i.mode === "unique") return i.y === row.y && i.m === row.m;
+  return true;
 }

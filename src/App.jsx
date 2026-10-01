@@ -281,14 +281,17 @@ export default function App() {
         alert("Aucune ligne exploitable trouvée dans ce fichier." + (parsed.categoriesInconnues.length ? "\nCatégories inconnues : " + parsed.categoriesInconnues.join(", ") : ""));
         return;
       }
-      const { extras, incomes, depensesTotal, revenusTotal } = rowsToEntries(parsed.rows);
+      const { extras, incomes, recurrentes, depensesTotal, revenusTotal } = rowsToEntries(parsed.rows, state);
       const msg =
         "Import du relevé :\n" +
-        extras.length + " dépense(s), total " + fmt(depensesTotal) + "\n" +
+        extras.length + " dépense(s) nouvelle(s), total " + fmt(depensesTotal) + "\n" +
         incomes.length + " revenu(s) unique(s), total " + fmt(revenusTotal) + "\n" +
+        (recurrentes.length
+          ? recurrentes.length + " ligne(s) déjà planifiée(s) (dépenses récurrentes ou revenus existants, non importées en double)\n"
+          : "") +
         parsed.ignored + " ligne(s) ignorée(s)" +
         (parsed.categoriesInconnues.length ? "\nCatégories inconnues : " + parsed.categoriesInconnues.join(", ") : "") +
-        "\n\nLes dépenses deviennent des dépenses exceptionnelles à leur date réelle ; les revenus des entrées uniques. Continuer ?";
+        "\n\nLes nouvelles dépenses deviennent des dépenses exceptionnelles à leur date réelle ; les nouveaux revenus des entrées uniques. Continuer ?";
       if (window.confirm(msg)) {
         setState((s) => ({
           ...s,
