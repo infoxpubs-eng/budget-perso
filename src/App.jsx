@@ -26,6 +26,7 @@ import {
   monthlyExpenses,
 } from "./lib/budget.js";
 import { TAXONOMIE, depenseCats, revenuOptions, taxCat, taxSub, labelOf, envelopeOf } from "./lib/taxonomie.js";
+import { parseCsv, rowsToEntries } from "./lib/import-csv.js";
 
 /* ============================== Données initiales ============================== */
 
@@ -195,6 +196,7 @@ export default function App() {
   const [tab, setTab] = useState("apercu");
   const [monthIdx, setMonthIdx] = useState(0);
   const fileRef = useRef(null);
+  const csvRef = useRef(null);
 
   // ----- Persistance : chargement au démarrage -----
   useEffect(() => {
@@ -259,6 +261,40 @@ export default function App() {
         setMonthIdx(0);
       } catch (e) {
         alert("Fichier invalide ou illisible.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // ----- Import d'un relevé bancaire CSV (débit = dépense, crédit = revenu unique) -----
+  const importCsvFile = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let parsed;
+      try {
+        parsed = parseCsv(String(reader.result));
+      } catch (e) {
+        alert("Fichier CSV non reconnu : " + e.message);
+        return;
+      }
+      if (parsed.rows.length === 0) {
+        alert("Aucune ligne exploitable trouvée dans ce fichier." + (parsed.categoriesInconnues.length ? "\nCatégories inconnues : " + parsed.categoriesInconnues.join(", ") : ""));
+        return;
+      }
+      const { extras, incomes, depensesTotal, revenusTotal } = rowsToEntries(parsed.rows);
+      const msg =
+        "Import du relevé :\n" +
+        extras.length + " dépense(s), total " + fmt(depensesTotal) + "\n" +
+        incomes.length + " revenu(s) unique(s), total " + fmt(revenusTotal) + "\n" +
+        parsed.ignored + " ligne(s) ignorée(s)" +
+        (parsed.categoriesInconnues.length ? "\nCatégories inconnues : " + parsed.categoriesInconnues.join(", ") : "") +
+        "\n\nLes dépenses deviennent des dépenses exceptionnelles à leur date réelle ; les revenus des entrées uniques. Continuer ?";
+      if (window.confirm(msg)) {
+        setState((s) => ({
+          ...s,
+          extras: [...s.extras, ...extras],
+          incomes: [...s.incomes, ...incomes],
+        }));
       }
     };
     reader.readAsText(file);
@@ -334,6 +370,7 @@ export default function App() {
             </button>
             <button className={btnCls} onClick={exportData} title="Télécharger vos données en JSON">📤 Exporter</button>
             <button className={btnCls} onClick={() => fileRef.current && fileRef.current.click()} title="Restaurer depuis un fichier JSON">📥 Importer</button>
+            <button className={btnCls} onClick={() => csvRef.current && csvRef.current.click()} title="Importer un relevé bancaire CSV (débit = dépense, crédit = revenu)">🧾 Relevé CSV</button>
             <button className={btnCls} onClick={resetData} title="Effacer les données">♻️</button>
             <input
               ref={fileRef}
@@ -342,6 +379,16 @@ export default function App() {
               className="hidden"
               onChange={(e) => {
                 if (e.target.files && e.target.files[0]) importData(e.target.files[0]);
+                e.target.value = "";
+              }}
+            />
+            <input
+              ref={csvRef}
+              type="file"
+              accept=".csv,text/csv,text/plain"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) importCsvFile(e.target.files[0]);
                 e.target.value = "";
               }}
             />
@@ -610,7 +657,9 @@ export default function App() {
                     <div className="min-w-0">
                       <div className="text-sm font-medium">{i.label}</div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-                        {i.mode === "salaire" ? (
+                        {i.mode === "unique" ? (
+                          <span>Le {i.day} {MONTHS[i.m]} {i.y} · une seule fois</span>
+                        ) : i.mode === "salaire" ? (
                           <>
                             <span>Avant-veille du dernier jour ouvré</span>
                             <span>·</span>
@@ -644,7 +693,7 @@ export default function App() {
               </div>
             </Card>
 
-            <IncomeForm onAdd={addIncome} />
+            <IncomeForm sims={sims} monthIdx={monthIdx} onAdd={addIncome} />
           </div>
         )}
 
@@ -981,7 +1030,7 @@ function ExtraForm({ sims, monthIdx, onAdd }) {
   );
 }
 
-function IncomeForm({ onAdd }) {
+function IncomeForm({ sims, monthIdx, onAdd }) {
   const ROPTS = useMemo(() => revenuOptions(), []);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState(0);
@@ -990,6 +1039,12 @@ function IncomeForm({ onAdd }) {
   const [treizieme, setTreizieme] = useState(false);
   const [bonus, setBonus] = useState(0);
   const [rcat, setRcat] = useState("revenus-travail|salaire-fixe");
+  const [uIdx, setUIdx] = useState(monthIdx);
+
+  // Suit le mois sélectionné en en-tête tant que l'utilisateur n'a pas choisi
+  useEffect(() => { setUIdx(monthIdx); }, [monthIdx]);
+
+  const target = sims[Math.min(uIdx, 11)];
 
   const submit = () => {
     if (!label.trim() || amount <= 0) return;
@@ -999,7 +1054,9 @@ function IncomeForm({ onAdd }) {
       label: label.trim(),
       amount,
       mode,
-      day: mode === "fixe" ? Math.min(31, Math.max(1, day)) : undefined,
+      day: mode === "salaire" ? undefined : Math.min(31, Math.max(1, day)),
+      y: mode === "unique" ? target.y : undefined,
+      m: mode === "unique" ? target.m : undefined,
       treizieme: mode === "salaire" ? treizieme : false,
       bonus: mode === "salaire" ? bonus : 0,
       cat,
@@ -1025,7 +1082,8 @@ function IncomeForm({ onAdd }) {
           <Field label="Mode de versement">
             <select className={inputCls} value={mode} onChange={(e) => setMode(e.target.value)}>
               <option value="salaire">Salaire (avant-veille du dernier jour ouvré)</option>
-              <option value="fixe">Jour fixe du mois</option>
+              <option value="fixe">Jour fixe du mois (récurrent)</option>
+              <option value="unique">Revenu unique (une seule fois)</option>
             </select>
           </Field>
         </div>
@@ -1040,6 +1098,27 @@ function IncomeForm({ onAdd }) {
               onChange={(e) => setDay(Number(e.target.value))}
             />
           </Field>
+        )}
+        {mode === "unique" && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Jour du mois (1–31)">
+              <input
+                className={inputCls}
+                type="number"
+                min={1}
+                max={31}
+                value={day}
+                onChange={(e) => setDay(Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Mois">
+              <select className={inputCls} value={uIdx} onChange={(e) => setUIdx(Number(e.target.value))}>
+                {sims.map((s, i) => (
+                  <option key={i} value={i}>{s.label}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
         )}
         <Field label="Catégorie bancaire">
           <select className={inputCls} value={rcat} onChange={(e) => setRcat(e.target.value)}>

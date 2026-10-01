@@ -231,6 +231,18 @@ describe("transactionsOfMonth", () => {
     expect(txNov.some((t) => t.label === "Réparation voiture")).toBe(false);
   });
 
+  it("verse un revenu unique uniquement dans son mois précis", () => {
+    const state = baseState();
+    state.incomes.push({ id: "i2", label: "Remboursement", amount: 1.35, mode: "unique", day: 30, y: 2026, m: 8, cat: "services-financiers", sub: "remboursement-frais" });
+    const sept = transactionsOfMonth(state, 2026, 8);
+    const oct = transactionsOfMonth(state, 2026, 9);
+    const unique = sept.find((t) => t.mode === undefined && t.label === "Remboursement");
+    expect(unique).toBeTruthy();
+    expect(unique.day).toBe(30);
+    expect(unique.amount).toBe(1.35);
+    expect(oct.some((t) => t.label === "Remboursement")).toBe(false);
+  });
+
   it("verse les salaires l'avant-veille du dernier jour ouvré", () => {
     const state = baseState();
     state.incomes = [{ id: "i1", label: "Salaire", amount: 2000, mode: "salaire" }];

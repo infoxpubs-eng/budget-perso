@@ -235,3 +235,37 @@ export function revenuOptions() {
   }
   return out;
 }
+
+/* ------------------------------------------------------------------ */
+/* Correspondance par libellé (import CSV bancaire)                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Normalise un libellé pour comparaison tolérante : minuscules, accents
+ * retirés, points de suspension et parenthèses ignorés, espaces compactés.
+ */
+export function normalizeLabel(s) {
+  return String(s ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[…]|\.\.\./g, " ")
+    .replace(/[()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Catégorie dont le libellé correspond (tolérant aux accents / «…»). */
+export function catByLabel(label) {
+  const n = normalizeLabel(label);
+  if (!n) return undefined;
+  return TAXONOMIE.find((c) => normalizeLabel(c.label) === n);
+}
+
+/** Sous-catégorie d'une catégorie dont le libellé correspond. */
+export function subByLabel(catId, subLabel) {
+  const c = taxCat(catId);
+  const n = normalizeLabel(subLabel);
+  if (!c || !n) return undefined;
+  return c.subs.find((s) => normalizeLabel(s.label) === n);
+}

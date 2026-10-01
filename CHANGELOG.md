@@ -12,6 +12,18 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.4.0] — 2026-10-01
+
+### Ajouté
+
+- **Import de relevé bancaire CSV** (bouton 🧾 « Relevé CSV ») : lit le format d'export `Date transaction;Date comptabilisation;Catégorie;Sous-Catégorie;Montant;Pointée;` (séparateur `;`, CRLF, BOM, guillemets et lignes vides tolérés)
+  - Montants au format français (« -22,67 ») : les débits deviennent des **dépenses exceptionnelles** à leur date réelle, les crédits des **revenus uniques** (mode « unique »)
+  - Rapprochement automatique Catégorie / Sous-Catégorie avec la nomenclature bancaire v0.3.0 (accents, casse, «…» et parenthèses ignorés) ; une sous-catégorie inconnue reste importée sans sous-catégorie ; les lignes à catégorie inconnue, date ou montant illisible sont ignorées et signalées
+  - Récapitulatif avant import (nombre de dépenses / revenus, totaux, lignes ignorées, catégories inconnues)
+- **Mode de revenu « unique »** : entrée d'argent versée une seule fois, à un jour et un mois précis (jour + selecteur de mois dans le formulaire ; affichage « une seule fois » dans la liste) — aussi utile en dehors de l'import
+- Nouveau module `src/lib/import-csv.js` (pur, testable) : `parseCsv`, `parseFrDate`, `parseFrAmount`, `rowsToEntries` + correspondance par libellé dans `taxonomie.js` (`normalizeLabel`, `catByLabel`, `subByLabel`)
+- 12 nouveaux tests (55 au total), dont l'analyse d'un extrait de relevé réel (7 lignes, rapprochement complet, 131,71 € de dépenses / 2,70 € de revenus)
+
 ## [0.3.0] — 2026-10-01
 
 ### Ajouté

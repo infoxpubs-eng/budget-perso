@@ -181,7 +181,18 @@ export function transactionsOfMonth(state, y, m) {
   }
 
   for (const i of state.incomes) {
-    if (i.mode === "salaire") {
+    if (i.mode === "unique") {
+      if (i.y !== y || i.m !== m) continue;
+      tx.push({
+        day: Math.min(i.day, dim),
+        label: i.label,
+        amount: i.amount,
+        type: "in",
+        cat: i.cat ?? "revenus-travail",
+        sub: i.sub,
+        inc: false,
+      });
+    } else if (i.mode === "salaire") {
       const day = salaryPayDay(y, m);
       tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false });
       if (i.treizieme && (m === 5 || m === 10)) {
