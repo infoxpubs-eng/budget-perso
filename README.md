@@ -20,11 +20,9 @@ Application React de gestion de budget personnel qui répond à une question sim
 - **Alerte découvert** : point le plus bas du mois mis en évidence si le solde devient négatif
 - **Persistance complète** : sauvegarde automatique dans le navigateur (localStorage), export / import JSON, réinitialisation, migration automatique des anciennes sauvegardes
 
-## 🌐 Version en ligne
+## 🌐 Accès en ligne
 
-👉 **https://infoxpubs-eng.github.io/budget-perso/**
-
-L'application est publiée sur GitHub Pages, avec déploiement automatique à chaque push sur `main` (workflow `.github/workflows/deploy.yml`). Les données de chaque utilisateur restent dans son propre navigateur (localStorage) : rien n'est transmis à un serveur.
+L'application est publiée sur GitHub Pages : **<https://infoxpubs-eng.github.io/budget-perso/>**
 
 ## Démarrage rapide
 
@@ -48,8 +46,7 @@ rt Tailwind
 │   └── lib/
 │       ├── budget.js       # logique métier pure (simulation, agrégats) — sans React
 │       └── budget.test.js  # tests unitaires Vitest de la logique métier
-├── .github/workflows/ci.yml     # CI : les tests tournent à chaque push
-└── .github/workflows/deploy.yml  # Déploiement GitHub Pages
+└── .github/workflows/ci.yml  # CI : les tests tournent à chaque push
 ```
 
 ## Logique métier (`src/lib/budget.js`)
