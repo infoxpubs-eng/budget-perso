@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -20,32 +20,38 @@ import {
   MONTHS,
   fmt,
   monthLabel,
+  salaryPayDay,
   simulate,
-  freqInMonth,
-  expensesByCat,
+  migrateState,
+  monthlyExpenses,
 } from "./lib/budget.js";
 
 /* ============================== Données initiales ============================== */
 
-const DEFAULT_STATE = {
+const now0 = new Date();
+
+const DEFAULT_STATE = migrateState({
   soldeDepart: 1500,
   expenses: [
-    { id: uuid(), label: "Loyer", amount: 850, day: 3, cat: "domestiques", freq: "mensuelle" },
-    { id: uuid(), label: "Électricité / gaz", amount: 95, day: 8, cat: "domestiques", freq: "mensuelle" },
-    { id: uuid(), label: "Courses (début de mois)", amount: 220, day: 5, cat: "habituelles", freq: "mensuelle" },
+    { id: uuid(), label: "Loyer", amount: 850, day: 3, cat: "domestiques", freq: "mensuelle", incompressible: true },
+    { id: uuid(), label: "Électricité / gaz", amount: 95, day: 8, cat: "domestiques", freq: "mensuelle", incompressible: true },
+    { id: uuid(), label: "Courses (début de mois)", amount: 220, day: 5, cat: "habituelles", freq: "mensuelle", incompressible: true },
     { id: uuid(), label: "Courses (mi-mois)", amount: 220, day: 20, cat: "habituelles", freq: "mensuelle" },
-    { id: uuid(), label: "Internet + mobile", amount: 45, day: 12, cat: "habituelles", freq: "mensuelle" },
-    { id: uuid(), label: "Salle de sport", amount: 30, day: 1, cat: "sports", freq: "mensuelle" },
+    { id: uuid(), label: "Internet + mobile", amount: 45, day: 12, cat: "habituelles", freq: "mensuelle", incompressible: true },
+    { id: uuid(), label: "Salle de sport", amount: 30, day: 1, cat: "sports", freq: "mensuelle", incompressible: true },
     { id: uuid(), label: "Streaming & abonnements", amount: 25, day: 15, cat: "loisirs", freq: "mensuelle" },
     { id: uuid(), label: "Sorties / restaurants", amount: 80, day: 25, cat: "loisirs", freq: "mensuelle" },
     { id: uuid(), label: "Vacances d'été", amount: 1200, day: 2, cat: "voyages", freq: "annuelle", month: 7 },
   ],
   incomes: [
-    { id: uuid(), label: "Salaire", amount: 2500, day: 27, freq: "mensuelle" },
-    { id: uuid(), label: "Aide / allocations", amount: 180, day: 5, freq: "mensuelle" },
+    { id: uuid(), label: "Salaire", amount: 2500, mode: "salaire", treizieme: true, bonus: 1000 },
+    { id: uuid(), label: "Aide / allocations", amount: 180, day: 5, mode: "fixe" },
   ],
-  budgets: { domestiques: 1000, habituelles: 500, sports: 50, loisirs: 120, voyages: 100 },
-};
+  extras: [
+    { id: uuid(), label: "Réparation voiture", amount: 350, day: 18, y: now0.getFullYear(), m: now0.getMonth(), cat: "exceptionnelles" },
+  ],
+  budgets: { domestiques: 1000, habituelles: 500, sports: 50, loisirs: 120, voyages: 100, exceptionnelles: 300 },
+});
 
 /* ============================== Composants UI ============================== */
 
@@ -123,6 +129,24 @@ function Badge({ children, color }) {
   );
 }
 
+const IncBadge = () => (
+  <Badge color="#475569">🔒 Incompressible</Badge>
+);
+
+function CheckRow({ checked, onChange, label }) {
+  return (
+    <label className="flex items-center gap-2 py-1 text-sm text-slate-700">
+      <input
+        type="checkbox"
+        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      {label}
+    </label>
+  );
+}
+
 /* ============================== Tooltips ============================== */
 
 function BalanceTooltip({ active, payload }) {
@@ -136,7 +160,10 @@ function BalanceTooltip({ active, payload }) {
         <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
           {p.events.map((e, i) => (
             <div key={i} className="flex items-center justify-between gap-4 text-xs">
-              <span className="text-slate-600">{e.label}</span>
+              <span className="text-slate-600">
+                {e.label}
+                {e.inc ? " 🔒" : ""}
+              </span>
               <span className={e.type === "in" ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
                 {e.type === "in" ? "+" : "−"}{fmt(Math.abs(e.amount))}
               </span>
@@ -166,22 +193,25 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState("apercu");
   const [monthIdx, setMonthIdx] = useState(0);
+  const fileRef = useRef(null);
 
-  // Persistance locale (si disponible)
+  // ----- Persistance : chargement au démarrage -----
   useEffect(() => {
     try {
-      const raw = localStorage.getItem("budget-perso-v1");
+      const raw = localStorage.getItem("budget-perso-v2");
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object") setState({ ...DEFAULT_STATE, ...parsed });
+        if (parsed && typeof parsed === "object") setState(migrateState(parsed));
       }
     } catch (e) {}
     setLoaded(true);
   }, []);
+
+  // ----- Persistance : sauvegarde à chaque modification -----
   useEffect(() => {
     if (!loaded) return;
     try {
-      localStorage.setItem("budget-perso-v1", JSON.stringify(state));
+      localStorage.setItem("budget-perso-v2", JSON.stringify(state));
     } catch (e) {}
   }, [state, loaded]);
 
@@ -193,12 +223,57 @@ export default function App() {
 
   const addExpense = (e) => setState((s) => ({ ...s, expenses: [...s.expenses, e] }));
   const delExpense = (id) => setState((s) => ({ ...s, expenses: s.expenses.filter((x) => x.id !== id) }));
+  const addExtra = (x) => setState((s) => ({ ...s, extras: [...s.extras, x] }));
+  const delExtra = (id) => setState((s) => ({ ...s, extras: s.extras.filter((x) => x.id !== id) }));
   const addIncome = (i) => setState((s) => ({ ...s, incomes: [...s.incomes, i] }));
   const delIncome = (id) => setState((s) => ({ ...s, incomes: s.incomes.filter((x) => x.id !== id) }));
   const setBudget = (cat, n) => setState((s) => ({ ...s, budgets: { ...s.budgets, [cat]: n } }));
 
-  // Dépenses planifiées du mois par catégorie
-  const byCat = useMemo(() => expensesByCat(state.expenses, sim.m), [state.expenses, sim.m]);
+  // ----- Export / import / réinitialisation -----
+  const exportData = () => {
+    try {
+      const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "budget-perso-" + new Date().toISOString().slice(0, 10) + ".json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Export impossible : " + e.message);
+    }
+  };
+
+  const importData = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.expenses) || !Array.isArray(parsed.incomes)) {
+          throw new Error("structure inattendue");
+        }
+        setState(migrateState(parsed));
+        setMonthIdx(0);
+      } catch (e) {
+        alert("Fichier invalide ou illisible.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const resetData = () => {
+    if (window.confirm("Effacer toutes vos données et revenir à l'exemple de démonstration ?")) {
+      try { localStorage.removeItem("budget-perso-v2"); } catch (e) {}
+      setState(DEFAULT_STATE);
+      setMonthIdx(0);
+    }
+  };
+
+  // Dépenses planifiées du mois par catégorie + répartition incompressible
+  const agg = useMemo(() => monthlyExpenses(state, sim.y, sim.m), [state, sim.y, sim.m]);
+  const byCat = agg.byCat;
 
   const dailyFlow = sim.daily
     .filter((d) => d.day > 0)
@@ -211,10 +286,12 @@ export default function App() {
 
   const tabs = [
     { id: "apercu", label: "Aperçu" },
-    { id: "depenses", label: "Dépenses récurrentes" },
+    { id: "depenses", label: "Dépenses" },
     { id: "revenus", label: "Revenus" },
     { id: "budget", label: "Budget par catégorie" },
   ];
+
+  const btnCls = "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-100";
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -224,20 +301,16 @@ export default function App() {
           <div>
             <h1 className="text-2xl font-bold">💰 Budget prévisionnel</h1>
             <p className="text-sm text-slate-500">
-              Solde de départ : le mois 1 commence en {monthLabel(start.y, start.m)}. Les mois suivants reprennent le solde prévu.
+              💾 Sauvegarde automatique dans ce navigateur · Mois 1 : {monthLabel(start.y, start.m)}
             </p>
           </div>
-          <div className="flex items-end gap-3">
-            <div className="w-44">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="w-40">
               <Field label="Solde de départ (€)">
                 <NumInput value={state.soldeDepart} onChange={setSolde} />
               </Field>
             </div>
-            <button
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-100 disabled:opacity-40"
-              onClick={() => setMonthIdx((i) => Math.max(0, i - 1))}
-              disabled={monthIdx === 0}
-            >
+            <button className={btnCls} onClick={() => setMonthIdx((i) => Math.max(0, i - 1))} disabled={monthIdx === 0}>
               ←
             </button>
             <select className={inputCls + " w-44"} value={monthIdx} onChange={(e) => setMonthIdx(Number(e.target.value))}>
@@ -245,13 +318,22 @@ export default function App() {
                 <option key={i} value={i}>{s.label}</option>
               ))}
             </select>
-            <button
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-100 disabled:opacity-40"
-              onClick={() => setMonthIdx((i) => Math.min(11, i + 1))}
-              disabled={monthIdx === 11}
-            >
+            <button className={btnCls} onClick={() => setMonthIdx((i) => Math.min(11, i + 1))} disabled={monthIdx === 11}>
               →
             </button>
+            <button className={btnCls} onClick={exportData} title="Télécharger vos données en JSON">📤 Exporter</button>
+            <button className={btnCls} onClick={() => fileRef.current && fileRef.current.click()} title="Restaurer depuis un fichier JSON">📥 Importer</button>
+            <button className={btnCls} onClick={resetData} title="Effacer les données">♻️</button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) importData(e.target.files[0]);
+                e.target.value = "";
+              }}
+            />
           </div>
         </header>
 
@@ -300,7 +382,7 @@ export default function App() {
                   </span>
                 )}
               </div>
-              <p className="mb-3 text-xs text-slate-500">Survolez le graphique pour voir les opérations débitées / créditées chaque jour.</p>
+              <p className="mb-3 text-xs text-slate-500">Survolez le graphique pour voir les opérations débitées / créditées chaque jour (🔒 = incompressible).</p>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={sim.daily} margin={{ top: 10, right: 16, bottom: 4, left: 8 }}>
@@ -352,7 +434,7 @@ export default function App() {
                               <div className="font-semibold text-slate-600">{label} {MONTHS[sim.m]}</div>
                               {(day ? day.events : []).map((e, i) => (
                                 <div key={i} className="mt-1 flex justify-between gap-6">
-                                  <span>{e.label}</span>
+                                  <span>{e.label}{e.inc ? " 🔒" : ""}</span>
                                   <span className={e.type === "in" ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
                                     {e.type === "in" ? "+" : "−"}{fmt(Math.abs(e.amount))}
                                   </span>
@@ -413,44 +495,87 @@ export default function App() {
         {/* ------------------------------ DÉPENSES ------------------------------ */}
         {tab === "depenses" && (
           <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
-              <h2 className="mb-3 font-semibold">Dépenses récurrentes ({state.expenses.length})</h2>
-              <div className="space-y-2">
-                {state.expenses.map((e) => {
-                  const cat = CATS.find((c) => c.id === e.cat);
-                  return (
-                    <div key={e.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium">{e.label}</div>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-                          <span>Le {e.day} du mois</span>
-                          <span>·</span>
-                          {e.freq === "annuelle" ? <span>{MONTHS[(e.month ?? 1) - 1]}</span> : <span>Chaque mois</span>}
-                          <Badge color={cat ? cat.color : "#94a3b8"}>{cat ? cat.label : "?"}</Badge>
+            <div className="space-y-6 lg:col-span-2">
+              <Card>
+                <h2 className="mb-3 font-semibold">Dépenses récurrentes ({state.expenses.length})</h2>
+                <div className="space-y-2">
+                  {state.expenses.map((e) => {
+                    const cat = CATS.find((c) => c.id === e.cat);
+                    return (
+                      <div key={e.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">{e.label}</div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                            <span>Le {e.day} du mois</span>
+                            <span>·</span>
+                            {e.freq === "annuelle" ? <span>{MONTHS[(e.month ?? 1) - 1]}</span> : <span>Chaque mois</span>}
+                            <Badge color={cat ? cat.color : "#94a3b8"}>{cat ? cat.label : "?"}</Badge>
+                            {e.incompressible && <IncBadge />}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-semibold text-rose-600">− {fmt(e.amount)}</span>
+                          <button
+                            className="rounded-md px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                            onClick={() => delExpense(e.id)}
+                            title="Supprimer"
+                          >
+                            ✕
+                          </button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="font-semibold text-rose-600">− {fmt(e.amount)}</span>
-                        <button
-                          className="rounded-md px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                          onClick={() => delExpense(e.id)}
-                          title="Supprimer"
-                        >
-                          ✕
-                        </button>
-                      </div>
+                    );
+                  })}
+                  {state.expenses.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
+                      Aucune dépense récurrente enregistrée.
                     </div>
-                  );
-                })}
-                {state.expenses.length === 0 && (
-                  <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
-                    Aucune dépense enregistrée.
-                  </div>
-                )}
-              </div>
-            </Card>
+                  )}
+                </div>
+              </Card>
 
-            <ExpenseForm onAdd={addExpense} />
+              <Card>
+                <h2 className="mb-1 font-semibold">Dépenses exceptionnelles ({state.extras.length})</h2>
+                <p className="mb-3 text-xs text-slate-500">Dépenses unitaires, à une date précise.</p>
+                <div className="space-y-2">
+                  {state.extras.map((x) => {
+                    const cat = CATS.find((c) => c.id === (x.cat ?? "exceptionnelles"));
+                    return (
+                      <div key={x.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">{x.label}</div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                            <span>{monthLabel(x.y, x.m)} · le {x.day}</span>
+                            <Badge color={cat ? cat.color : "#94a3b8"}>{cat ? cat.label : "?"}</Badge>
+                            {x.incompressible && <IncBadge />}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-semibold text-rose-600">− {fmt(x.amount)}</span>
+                          <button
+                            className="rounded-md px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                            onClick={() => delExtra(x.id)}
+                            title="Supprimer"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {state.extras.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
+                      Aucune dépense exceptionnelle.
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
+
+            <div className="space-y-6">
+              <ExpenseForm onAdd={addExpense} />
+              <ExtraForm sims={sims} monthIdx={monthIdx} onAdd={addExtra} />
+            </div>
           </div>
         )}
 
@@ -458,14 +583,27 @@ export default function App() {
         {tab === "revenus" && (
           <div className="grid gap-6 lg:grid-cols-3">
             <Card className="lg:col-span-2">
-              <h2 className="mb-3 font-semibold">Entrées d'argent récurrentes ({state.incomes.length})</h2>
+              <h2 className="mb-1 font-semibold">Entrées d'argent ({state.incomes.length})</h2>
+              <p className="mb-3 text-xs text-slate-500">
+                Les salaires sont versés l'avant-veille du dernier jour ouvré du mois — ce mois-ci : le {salaryPayDay(sim.y, sim.m)} {MONTHS[sim.m].toLowerCase()}.
+              </p>
               <div className="space-y-2">
                 {state.incomes.map((i) => (
                   <div key={i.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-sm font-medium">{i.label}</div>
-                      <div className="mt-0.5 text-xs text-slate-500">
-                        Le {i.day} du mois · {i.freq === "annuelle" ? MONTHS[(i.month ?? 1) - 1] : "Chaque mois"}
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                        {i.mode === "salaire" ? (
+                          <>
+                            <span>Avant-veille du dernier jour ouvré</span>
+                            <span>·</span>
+                            <span>le {salaryPayDay(sim.y, sim.m)} ce mois-ci</span>
+                            {i.treizieme && <Badge color="#10b981">13ᵉ mois en 2 × ½ (juin + nov.)</Badge>}
+                            {(i.bonus ?? 0) > 0 && <Badge color="#10b981">Bonus {fmt(i.bonus)} en mars</Badge>}
+                          </>
+                        ) : (
+                          <span>Le {i.day} du mois</span>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -498,7 +636,7 @@ export default function App() {
             <Card>
               <h2 className="mb-1 font-semibold">Budget prévisionnel — {sim.label}</h2>
               <p className="mb-4 text-xs text-slate-500">
-                Comparez l'enveloppe que vous souhaitez consacrer à chaque type de dépenses avec le total réellement planifié ce mois-ci.
+                Comparez l'enveloppe que vous souhaitez consacrer à chaque type de dépenses avec le total réellement planifié ce mois-ci (récurrentes + exceptionnelles).
               </p>
               <div className="space-y-4">
                 {CATS.map((c) => {
@@ -543,27 +681,60 @@ export default function App() {
               </div>
             </Card>
 
-            <Card>
-              <h2 className="mb-3 font-semibold">Répartition des dépenses du mois par catégorie</h2>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={CATS.map((c) => ({ label: c.label, total: byCat[c.id] ?? 0, color: c.color }))}
-                    margin={{ top: 10, right: 10, bottom: 4, left: 8 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} />
-                    <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => v + "€"} width={56} />
-                    <Tooltip content={<SimpleTooltip />} />
-                    <Bar dataKey="total" radius={[6, 6, 0, 0]}>
-                      {CATS.map((c) => (
-                        <Cell key={c.id} fill={c.color} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </Card>
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card>
+                <h2 className="mb-1 font-semibold">Incompressible vs discrétionnaire — {sim.label}</h2>
+                <p className="mb-4 text-xs text-slate-500">
+                  Les dépenses incompressibles (🔒) sont celles que vous ne pouvez pas reporter ni réduire.
+                </p>
+                <div className="space-y-4">
+                  {[
+                    { label: "🔒 Incompressibles", value: agg.incompressible, color: "#475569" },
+                    { label: "🎯 Discrétionnaires", value: agg.discretionnaire, color: "#f59e0b" },
+                  ].map((row) => {
+                    const pct = agg.total > 0 ? Math.round((row.value / agg.total) * 100) : 0;
+                    return (
+                      <div key={row.label}>
+                        <div className="mb-1 flex items-center justify-between text-sm">
+                          <span className="font-medium">{row.label}</span>
+                          <span className="text-slate-600">
+                            <span className="font-semibold">{fmt(row.value)}</span> · {pct} %
+                          </span>
+                        </div>
+                        <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+                          <div className="h-full rounded-full" style={{ width: pct + "%", backgroundColor: row.color }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <p className="text-xs text-slate-500">
+                    Total planifié : <span className="font-semibold text-slate-700">{fmt(agg.total)}</span>
+                  </p>
+                </div>
+              </Card>
+
+              <Card>
+                <h2 className="mb-3 font-semibold">Répartition des dépenses du mois par catégorie</h2>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={CATS.map((c) => ({ label: c.label, total: byCat[c.id] ?? 0, color: c.color }))}
+                      margin={{ top: 10, right: 10, bottom: 4, left: 8 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} />
+                      <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => v + "€"} width={56} />
+                      <Tooltip content={<SimpleTooltip />} />
+                      <Bar dataKey="total" radius={[6, 6, 0, 0]}>
+                        {CATS.map((c) => (
+                          <Cell key={c.id} fill={c.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </Card>
+            </div>
           </div>
         )}
       </div>
@@ -580,6 +751,7 @@ function ExpenseForm({ onAdd }) {
   const [cat, setCat] = useState("domestiques");
   const [freq, setFreq] = useState("mensuelle");
   const [month, setMonth] = useState(1);
+  const [inc, setInc] = useState(false);
 
   const submit = () => {
     if (!label.trim() || amount <= 0) return;
@@ -591,15 +763,17 @@ function ExpenseForm({ onAdd }) {
       cat,
       freq,
       month: freq === "annuelle" ? month : undefined,
+      incompressible: inc,
     });
     setLabel("");
     setAmount(0);
     setDay(1);
+    setInc(false);
   };
 
   return (
     <Card>
-      <h2 className="mb-3 font-semibold">Ajouter une dépense</h2>
+      <h2 className="mb-3 font-semibold">Ajouter une dépense récurrente</h2>
       <div className="space-y-3">
         <Field label="Libellé">
           <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex. Loyer" />
@@ -643,6 +817,7 @@ function ExpenseForm({ onAdd }) {
             </Field>
           )}
         </div>
+        <CheckRow checked={inc} onChange={setInc} label="Dépense incompressible 🔒" />
         <button
           className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
           onClick={submit}
@@ -655,13 +830,18 @@ function ExpenseForm({ onAdd }) {
   );
 }
 
-function IncomeForm({ onAdd }) {
+function ExtraForm({ sims, monthIdx, onAdd }) {
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState(0);
   const [day, setDay] = useState(1);
-  const [freq, setFreq] = useState("mensuelle");
-  const [month, setMonth] = useState(1);
+  const [simIdx, setSimIdx] = useState(monthIdx);
+  const [cat, setCat] = useState("exceptionnelles");
+  const [inc, setInc] = useState(false);
 
+  // Suit le mois sélectionné en en-tête tant que l'utilisateur n'a pas choisi
+  useEffect(() => { setSimIdx(monthIdx); }, [monthIdx]);
+
+  const target = sims[Math.min(simIdx, 11)];
   const submit = () => {
     if (!label.trim() || amount <= 0) return;
     onAdd({
@@ -669,20 +849,24 @@ function IncomeForm({ onAdd }) {
       label: label.trim(),
       amount,
       day: Math.min(31, Math.max(1, day)),
-      freq,
-      month: freq === "annuelle" ? month : undefined,
+      y: target.y,
+      m: target.m,
+      cat,
+      incompressible: inc,
     });
     setLabel("");
     setAmount(0);
     setDay(1);
+    setInc(false);
   };
 
   return (
     <Card>
-      <h2 className="mb-3 font-semibold">Ajouter une entrée d'argent</h2>
+      <h2 className="mb-1 font-semibold">Ajouter une dépense exceptionnelle</h2>
+      <p className="mb-3 text-xs text-slate-500">Dépense unitaire, une seule fois, à une date précise.</p>
       <div className="space-y-3">
         <Field label="Libellé">
-          <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex. Salaire" />
+          <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex. Réparation voiture" />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Montant (€)">
@@ -699,23 +883,100 @@ function IncomeForm({ onAdd }) {
             />
           </Field>
         </div>
+        <Field label="Mois">
+          <select className={inputCls} value={simIdx} onChange={(e) => setSimIdx(Number(e.target.value))}>
+            {sims.map((s, i) => (
+              <option key={i} value={i}>{s.label}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Type">
+          <select className={inputCls} value={cat} onChange={(e) => setCat(e.target.value)}>
+            {CATS.map((c) => (
+              <option key={c.id} value={c.id}>{c.label}</option>
+            ))}
+          </select>
+        </Field>
+        <CheckRow checked={inc} onChange={setInc} label="Dépense incompressible 🔒" />
+        <button
+          className="w-full rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
+          onClick={submit}
+          disabled={!label.trim() || amount <= 0}
+        >
+          Ajouter la dépense exceptionnelle
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function IncomeForm({ onAdd }) {
+  const [label, setLabel] = useState("");
+  const [amount, setAmount] = useState(0);
+  const [mode, setMode] = useState("salaire");
+  const [day, setDay] = useState(27);
+  const [treizieme, setTreizieme] = useState(false);
+  const [bonus, setBonus] = useState(0);
+
+  const submit = () => {
+    if (!label.trim() || amount <= 0) return;
+    onAdd({
+      id: uuid(),
+      label: label.trim(),
+      amount,
+      mode,
+      day: mode === "fixe" ? Math.min(31, Math.max(1, day)) : undefined,
+      treizieme: mode === "salaire" ? treizieme : false,
+      bonus: mode === "salaire" ? bonus : 0,
+    });
+    setLabel("");
+    setAmount(0);
+    setTreizieme(false);
+    setBonus(0);
+  };
+
+  return (
+    <Card>
+      <h2 className="mb-3 font-semibold">Ajouter une entrée d'argent</h2>
+      <div className="space-y-3">
+        <Field label="Libellé">
+          <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex. Salaire" />
+        </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Fréquence">
-            <select className={inputCls} value={freq} onChange={(e) => setFreq(e.target.value)}>
-              <option value="mensuelle">Mensuelle</option>
-              <option value="annuelle">Annuelle</option>
+          <Field label="Montant (€)">
+            <NumInput value={amount} onChange={setAmount} />
+          </Field>
+          <Field label="Mode de versement">
+            <select className={inputCls} value={mode} onChange={(e) => setMode(e.target.value)}>
+              <option value="salaire">Salaire (avant-veille du dernier jour ouvré)</option>
+              <option value="fixe">Jour fixe du mois</option>
             </select>
           </Field>
-          {freq === "annuelle" && (
-            <Field label="Mois">
-              <select className={inputCls} value={month} onChange={(e) => setMonth(Number(e.target.value))}>
-                {MONTHS.map((m, i) => (
-                  <option key={m} value={i + 1}>{m}</option>
-                ))}
-              </select>
-            </Field>
-          )}
         </div>
+        {mode === "fixe" && (
+          <Field label="Jour du mois (1–31)">
+            <input
+              className={inputCls}
+              type="number"
+              min={1}
+              max={31}
+              value={day}
+              onChange={(e) => setDay(Number(e.target.value))}
+            />
+          </Field>
+        )}
+        {mode === "salaire" && (
+          <div className="space-y-2 rounded-lg bg-slate-50 p-3">
+            <CheckRow
+              checked={treizieme}
+              onChange={setTreizieme}
+              label="13ᵉ mois en 2 fois : ½ versée avec le salaire de juin, ½ avec celui de novembre"
+            />
+            <Field label="Bonus estimé, versé avec le salaire de mars (€)">
+              <NumInput value={bonus} onChange={setBonus} />
+            </Field>
+          </div>
+        )}
         <button
           className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
           onClick={submit}

@@ -4,9 +4,13 @@ import {
   daysInMonth,
   monthLabel,
   freqInMonth,
+  isBusinessDay,
+  lastBusinessDay,
+  salaryPayDay,
+  migrateState,
   transactionsOfMonth,
   simulate,
-  expensesByCat,
+  monthlyExpenses,
 } from "./budget.js";
 
 /* ------------------------------------------------------------------ */
@@ -18,13 +22,14 @@ function baseState() {
   return {
     soldeDepart: 1000,
     expenses: [
-      { id: "e1", label: "Loyer", amount: 800, day: 3, cat: "domestiques", freq: "mensuelle" },
+      { id: "e1", label: "Loyer", amount: 800, day: 3, cat: "domestiques", freq: "mensuelle", incompressible: true },
       { id: "e2", label: "Courses", amount: 200, day: 15, cat: "habituelles", freq: "mensuelle" },
       { id: "e3", label: "Vacances", amount: 900, day: 10, cat: "voyages", freq: "annuelle", month: 7 },
     ],
     incomes: [
-      { id: "i1", label: "Salaire", amount: 2000, day: 27, freq: "mensuelle" },
+      { id: "i1", label: "Salaire", amount: 2000, day: 27, mode: "fixe" },
     ],
+    extras: [],
     budgets: {},
   };
 }
@@ -69,6 +74,80 @@ describe("freqInMonth", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Jours ouvrés et jour de paie                                        */
+/* ------------------------------------------------------------------ */
+
+describe("isBusinessDay / lastBusinessDay", () => {
+  it("exclut les week-ends", () => {
+    expect(isBusinessDay(new Date(2026, 9, 31))).toBe(false); // samedi 31 oct. 2026
+    expect(isBusinessDay(new Date(2026, 9, 30))).toBe(true);  // vendredi
+  });
+
+  it("trouve le dernier jour ouvré du mois", () => {
+    expect(lastBusinessDay(2026, 9).getDate()).toBe(30); // oct. 2026 : 31 = samedi -> 30
+    expect(lastBusinessDay(2026, 1).getDate()).toBe(27); // fév. 2026 : 28 = samedi -> 27
+  });
+});
+
+describe("salaryPayDay (avant-veille du dernier jour ouvré)", () => {
+  it("paie 2 jours ouvrés avant le dernier jour ouvré", () => {
+    expect(salaryPayDay(2026, 9)).toBe(28);  // oct. 2026 : dernier JO 30 (ven) -> 28 (mer)
+    expect(salaryPayDay(2026, 11)).toBe(29); // déc. 2026 : dernier JO 31 (jeu) -> 29 (mar)
+    expect(salaryPayDay(2026, 1)).toBe(25);  // fév. 2026 : dernier JO 27 (ven) -> 25 (mer)
+  });
+
+  it("franchit un week-end quand il le faut", () => {
+    // nov. 2026 : dernier JO = lundi 30 ; avant-veille = jeudi 26 (week-end sauté)
+    expect(salaryPayDay(2026, 10)).toBe(26);
+    // août 2026 : dernier JO = lundi 31 ; avant-veille = jeudi 27
+    expect(salaryPayDay(2026, 7)).toBe(27);
+  });
+
+  it("retourne toujours un jour ouvré, jamais un week-end", () => {
+    for (let m = 0; m < 12; m++) {
+      const d = new Date(2027, m, salaryPayDay(2027, m));
+      expect(isBusinessDay(d)).toBe(true);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* migrateState                                                        */
+/* ------------------------------------------------------------------ */
+
+describe("migrateState", () => {
+  it("complète un état ancien sans perdre les données", () => {
+    const old = {
+      soldeDepart: 900,
+      expenses: [{ id: "a", label: "Loyer", amount: 700, day: 1, cat: "domestiques", freq: "mensuelle" }],
+      incomes: [{ id: "b", label: "Salaire", amount: 2000, day: 27 }],
+      budgets: { domestiques: 800 },
+    };
+    const s = migrateState(old);
+    expect(s.soldeDepart).toBe(900);
+    expect(s.expenses[0].incompressible).toBe(false);
+    expect(s.incomes[0].mode).toBe("fixe");
+    expect(s.incomes[0].treizieme).toBe(false);
+    expect(s.incomes[0].bonus).toBe(0);
+    expect(Array.isArray(s.extras)).toBe(true);
+    expect(s.budgets.domestiques).toBe(800);
+  });
+
+  it("remplit un état vide avec des valeurs sûres", () => {
+    const s = migrateState(null);
+    expect(s.soldeDepart).toBe(1500);
+    expect(s.expenses).toEqual([]);
+    expect(s.incomes).toEqual([]);
+    expect(s.extras).toEqual([]);
+  });
+
+  it("devine le mode « salaire » pour un revenu sans jour fixe", () => {
+    const s = migrateState({ incomes: [{ id: "x", label: "Salaire", amount: 2000 }] });
+    expect(s.incomes[0].mode).toBe("salaire");
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* transactionsOfMonth                                                */
 /* ------------------------------------------------------------------ */
 
@@ -80,6 +159,7 @@ describe("transactionsOfMonth", () => {
     const salaire = tx.find((t) => t.label === "Salaire");
     expect(loyer.amount).toBe(-800);
     expect(loyer.type).toBe("out");
+    expect(loyer.inc).toBe(true); // loyer marqué incompressible
     expect(salaire.amount).toBe(2000);
     expect(salaire.type).toBe("in");
   });
@@ -96,6 +176,46 @@ describe("transactionsOfMonth", () => {
     state.expenses.push({ id: "e4", label: "Assurance", amount: 50, day: 31, cat: "habituelles", freq: "mensuelle" });
     const tx = transactionsOfMonth(state, 2026, 3); // avril (30 jours)
     expect(tx.find((t) => t.label === "Assurance").day).toBe(30);
+  });
+
+  it("inclut une dépense exceptionnelle uniquement dans son mois précis", () => {
+    const state = baseState();
+    state.extras.push({ id: "x1", label: "Réparation voiture", amount: 400, day: 18, y: 2026, m: 9, cat: "exceptionnelles" });
+    const txOct = transactionsOfMonth(state, 2026, 9);
+    expect(txOct.find((t) => t.label === "Réparation voiture").day).toBe(18);
+    const txNov = transactionsOfMonth(state, 2026, 10);
+    expect(txNov.some((t) => t.label === "Réparation voiture")).toBe(false);
+  });
+
+  it("verse les salaires l'avant-veille du dernier jour ouvré", () => {
+    const state = baseState();
+    state.incomes = [{ id: "i1", label: "Salaire", amount: 2000, mode: "salaire" }];
+    const tx = transactionsOfMonth(state, 2026, 9); // octobre 2026
+    expect(tx.find((t) => t.label === "Salaire").day).toBe(salaryPayDay(2026, 9));
+  });
+
+  it("ajoute la ½ du 13ᵉ mois en juin et novembre seulement", () => {
+    const state = baseState();
+    state.incomes = [{ id: "i1", label: "Salaire", amount: 2000, mode: "salaire", treizieme: true }];
+    const juin = transactionsOfMonth(state, 2027, 5);
+    const nov = transactionsOfMonth(state, 2026, 10);
+    const mars = transactionsOfMonth(state, 2027, 2);
+    expect(juin.find((t) => t.label === "Salaire · 13ᵉ mois (½)").amount).toBe(1000);
+    expect(nov.find((t) => t.label === "Salaire · 13ᵉ mois (½)").amount).toBe(1000);
+    expect(mars.some((t) => t.label === "Salaire · 13ᵉ mois (½)")).toBe(false);
+    // Versé le même jour que le salaire
+    const salaireJuin = juin.find((t) => t.label === "Salaire");
+    const treize = juin.find((t) => t.label === "Salaire · 13ᵉ mois (½)");
+    expect(treize.day).toBe(salaireJuin.day);
+  });
+
+  it("ajoute le bonus estimé en mars seulement", () => {
+    const state = baseState();
+    state.incomes = [{ id: "i1", label: "Salaire", amount: 2000, mode: "salaire", bonus: 1200 }];
+    const mars = transactionsOfMonth(state, 2027, 2);
+    const avril = transactionsOfMonth(state, 2027, 3);
+    expect(mars.find((t) => t.label === "Salaire · bonus estimé").amount).toBe(1200);
+    expect(avril.some((t) => t.label === "Salaire · bonus estimé")).toBe(false);
   });
 });
 
@@ -138,6 +258,26 @@ describe("simulate", () => {
     expect(juillet.end).toBe(juillet.start + juillet.totalIn - juillet.totalOut);
   });
 
+  it("intègre une dépense exceptionnelle dans le mois concerné", () => {
+    const state = baseState();
+    state.extras.push({ id: "x1", label: "Réparation voiture", amount: 400, day: 18, y: 2026, m: 9, cat: "exceptionnelles" });
+    const sims = simulate(state, 2026, 0);
+    const oct = sims[9];
+    expect(oct.totalOut).toBe(1000 + 400);
+    expect(oct.daily[18].solde).toBeLessThan(oct.daily[17].solde);
+  });
+
+  it("encaisse le 13ᵉ mois en juin et novembre dans les revenus", () => {
+    const state = baseState();
+    state.incomes = [{ id: "i1", label: "Salaire", amount: 2000, mode: "salaire", treizieme: true }];
+    const sims = simulate(state, 2027, 5); // départ juin 2027
+    const juin = sims[0];
+    const nov = sims[5];
+    expect(juin.totalIn).toBe(2000 + 1000);
+    expect(nov.totalIn).toBe(2000 + 1000);
+    expect(sims[1].totalIn).toBe(2000); // juillet : rien de plus
+  });
+
   it("fournit une série quotidienne complète (jour 0 = solde initial)", () => {
     const sims = simulate(baseState(), 2026, 0); // janvier = 31 jours
     const daily = sims[0].daily;
@@ -168,26 +308,40 @@ describe("simulate", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* expensesByCat                                                       */
+/* monthlyExpenses                                                     */
 /* ------------------------------------------------------------------ */
 
-describe("expensesByCat", () => {
-  it("regroupe les dépenses mensuelles du mois par catégorie", () => {
+describe("monthlyExpenses", () => {
+  it("regroupe les dépenses récurrentes du mois par catégorie", () => {
     const state = baseState();
-    const byCat = expensesByCat(state.expenses, 0); // janvier
-    expect(byCat.domestiques).toBe(800);
-    expect(byCat.habituelles).toBe(200);
-    expect(byCat.voyages).toBe(0); // annuelle, pas en janvier
+    const agg = monthlyExpenses(state, 2026, 0); // janvier
+    expect(agg.byCat.domestiques).toBe(800);
+    expect(agg.byCat.habituelles).toBe(200);
+    expect(agg.byCat.voyages).toBe(0); // annuelle, pas en janvier
   });
 
-  it("inclut les dépenses annuelles dans leur mois", () => {
+  it("inclut les dépenses exceptionnelles du mois", () => {
     const state = baseState();
-    const byCat = expensesByCat(state.expenses, 6); // juillet
-    expect(byCat.voyages).toBe(900);
+    state.extras.push({ id: "x1", label: "Réparation voiture", amount: 400, day: 18, y: 2026, m: 9, cat: "exceptionnelles" });
+    const oct = monthlyExpenses(state, 2026, 9);
+    const jan = monthlyExpenses(state, 2026, 0);
+    expect(oct.byCat.exceptionnelles).toBe(400);
+    expect(jan.byCat.exceptionnelles).toBe(0);
+  });
+
+  it("sépare l'incompressible du discrétionnaire", () => {
+    const state = baseState();
+    state.expenses[0].incompressible = true; // loyer 800
+    state.expenses[1].incompressible = false; // courses 200
+    const agg = monthlyExpenses(state, 2026, 0);
+    expect(agg.incompressible).toBe(800);
+    expect(agg.discretionnaire).toBe(200);
+    expect(agg.total).toBe(1000);
+    expect(agg.incByCat.domestiques).toBe(800);
   });
 
   it("couvre toutes les catégories, même vides", () => {
-    const byCat = expensesByCat(baseState().expenses, 0);
-    expect(Object.keys(byCat).sort()).toEqual(CATS.map((c) => c.id).sort());
+    const agg = monthlyExpenses(baseState(), 2026, 0);
+    expect(Object.keys(agg.byCat).sort()).toEqual(CATS.map((c) => c.id).sort());
   });
 });

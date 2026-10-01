@@ -9,10 +9,25 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 
 ### Idées / backlog
 
-- Dépenses ponctuelles (non récurrentes)
-- Réglage du jour de bascule du mois (ex. bascule le 5)
-- Export / import des données (JSON)
 - Historique réel vs prévisionnel
+- Alertes d'échéance (notifications en amont des gros débits)
+
+## [0.2.0] — 2026-10-01
+
+### Ajouté
+
+- **Dépenses exceptionnelles** : dépenses unitaires à date précise (jour + mois de la fenêtre de 12 mois), catégorisables et marquables incompressibles
+- **Dépenses incompressibles** : indicateur 🔒 sur chaque dépense (récurrente ou exceptionnelle), badge dans les listes et dans les infobulles des graphiques, et carte « Incompressible vs discrétionnaire » (montants et pourcentages) dans l'onglet Budget
+- **Revenus type « salaire »** : versés l'avant-veille du dernier jour ouvré du mois (calcul automatique, week-ends franchis) ; le jour effectif s'adapte à chaque mois
+- **13ᵉ mois en 2 fois** : option par salaire — une ½ versée avec le salaire de juin, l'autre avec celui de novembre
+- **Bonus estimé** : option par salaire, versé avec le salaire de mars
+- **Persistance renforcée** : sauvegarde automatique à chaque modification + **export / import JSON** (📤 / 📥) + réinitialisation (♻️) ; migration automatique des anciennes sauvegardes (`migrateState`) vers le nouveau schéma
+- Nouvelle catégorie « Exceptionnelles » dans le budget prévisionnel
+- 15 nouveaux tests unitaires (33 au total) : jours de paie (dont franchissement de week-end), 13ᵉ mois, bonus de mars, dépenses exceptionnelles, migration d'état, agrégats incompressible/discrétionnaire
+
+### Modifié
+
+- `expensesByCat` remplacé par `monthlyExpenses(state, y, m)` (par catégorie + répartition incompressible, dépenses récurrentes et exceptionnelles confondues)
 
 ## [0.1.0] — 2026-10-01
 
@@ -27,9 +42,7 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
   - **Budget prévisionnel par catégorie** : enveloppes éditables, barres de progression et alerte de dépassement
   - **Alerte découvert** : mise en évidence du point le plus bas du mois si le solde devient négatif
   - Persistance locale des données (localStorage)
-- Module de logique métier pure `src/lib/budget.js` (sans dépendance React) :
-  `daysInMonth`, `monthLabel`, `freqInMonth`, `transactionsOfMonth`, `simulate`, `expensesByCat`
-- Suite de tests unitaires **Vitest** (`src/lib/budget.test.js`) couvrant bissextiles, tri des opérations,
-  dépenses annuelles, clamp du jour 31, enchaînement des soldes, détection de découvert et passage d'année
+- Module de logique métier pure `src/lib/budget.js` (sans dépendance React)
+- Suite de tests unitaires **Vitest** (`src/lib/budget.test.js`)
 - Workflow GitHub Actions **CI** exécutant les tests à chaque push / pull request
 - `README.md` (présentation, démarrage rapide, structure, référence de la logique métier)

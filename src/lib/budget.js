@@ -11,6 +11,7 @@ export const CATS = [
   { id: "sports", label: "Sports & autres", color: "#f59e0b" },
   { id: "loisirs", label: "Loisirs", color: "#ec4899" },
   { id: "voyages", label: "Voyages", color: "#0ea5e9" },
+  { id: "exceptionnelles", label: "Exceptionnelles", color: "#8b5cf6" },
 ];
 
 export const MONTHS = [
@@ -44,24 +45,140 @@ export function freqInMonth(freq, month, m) {
   return freq === "mensuelle" || (month ?? 1) - 1 === m;
 }
 
+/* ------------------------------------------------------------------ */
+/* Jours ouvrés                                                       */
+/* ------------------------------------------------------------------ */
+
+/** Samedi/dimanche exclus. */
+export function isBusinessDay(date) {
+  const w = date.getDay();
+  return w !== 0 && w !== 6;
+}
+
+/** Dernier jour ouvré d'un mois (semaine de 5 jours, hors jours fériés). */
+export function lastBusinessDay(y, m) {
+  const d = new Date(y, m + 1, 0);
+  while (!isBusinessDay(d)) d.setDate(d.getDate() - 1);
+  return new Date(d);
+}
+
+/**
+ * Jour de versement d'un salaire : l'avant-veille du dernier jour ouvré du mois,
+ * c'est-à-dire 2 jours ouvrés avant le dernier jour ouvré (week-ends franchis).
+ */
+export function salaryPayDay(y, m) {
+  const d = lastBusinessDay(y, m);
+  let back = 0;
+  while (back < 2) {
+    d.setDate(d.getDate() - 1);
+    if (isBusinessDay(d)) back++;
+  }
+  return d.getDate();
+}
+
+/* ------------------------------------------------------------------ */
+/* Migration / normalisation de l'état sauvegardé                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Complète un état (chargé du localStorage ou importé) avec les valeurs par
+ * défaut des champs ajoutés au fil des versions, sans perdre les données.
+ */
+export function migrateState(raw) {
+  const s = {
+    soldeDepart: 1500,
+    expenses: [],
+    incomes: [],
+    extras: [],
+    budgets: { domestiques: 0, habituelles: 0, sports: 0, loisirs: 0, voyages: 0, exceptionnelles: 0 },
+    ...(raw ?? {}),
+  };
+  s.expenses = (s.expenses ?? []).map((e) => ({ incompressible: false, freq: "mensuelle", ...e }));
+  s.extras = (s.extras ?? []).map((x) => ({
+    cat: "exceptionnelles",
+    incompressible: false,
+    ...x,
+  }));
+  s.incomes = (s.incomes ?? []).map((i) => ({
+    mode: i.mode ?? (i.day ? "fixe" : "salaire"),
+    treizieme: false,
+    bonus: 0,
+    ...i,
+  }));
+  return s;
+}
+
+/* ------------------------------------------------------------------ */
+/* Opérations d'un mois                                                */
+/* ------------------------------------------------------------------ */
+
 /**
  * Liste des opérations d'un mois donné, triées par jour.
- * @returns {Array<{day:number,label:string,amount:number,type:"in"|"out",cat:string}>}
+ * - dépenses récurrentes (mensuelles ou annuelles, jour ramené à la fin des mois courts)
+ * - dépenses exceptionnelles (date précise {y, m, day})
+ * - revenus à jour fixe
+ * - revenus type "salaire" : versés l'avant-veille du dernier jour ouvré,
+ *   avec en option la ½ du 13ᵉ mois en juin et novembre, et un bonus estimé en mars.
+ *
+ * @returns {Array<{day:number,label:string,amount:number,type:"in"|"out",cat:string,inc:boolean}>}
  */
 export function transactionsOfMonth(state, y, m) {
   const tx = [];
   const dim = daysInMonth(y, m);
+
   for (const e of state.expenses) {
     if (e.freq === "annuelle" && (e.month ?? 1) - 1 !== m) continue;
-    tx.push({ day: Math.min(e.day, dim), label: e.label, amount: -e.amount, type: "out", cat: e.cat });
+    tx.push({
+      day: Math.min(e.day, dim),
+      label: e.label,
+      amount: -e.amount,
+      type: "out",
+      cat: e.cat,
+      inc: !!e.incompressible,
+    });
   }
+
+  for (const x of state.extras ?? []) {
+    if (x.y !== y || x.m !== m) continue;
+    tx.push({
+      day: Math.min(x.day, dim),
+      label: x.label,
+      amount: -x.amount,
+      type: "out",
+      cat: x.cat ?? "exceptionnelles",
+      inc: !!x.incompressible,
+    });
+  }
+
   for (const i of state.incomes) {
-    if (i.freq === "annuelle" && (i.month ?? 1) - 1 !== m) continue;
-    tx.push({ day: Math.min(i.day, dim), label: i.label, amount: i.amount, type: "in", cat: "revenu" });
+    if (i.mode === "salaire") {
+      const day = salaryPayDay(y, m);
+      tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: "salaire", inc: false });
+      if (i.treizieme && (m === 5 || m === 10)) {
+        tx.push({ day, label: i.label + " · 13ᵉ mois (½)", amount: i.amount / 2, type: "in", cat: "salaire", inc: false });
+      }
+      if ((i.bonus ?? 0) > 0 && m === 2) {
+        tx.push({ day, label: i.label + " · bonus estimé", amount: i.bonus, type: "in", cat: "salaire", inc: false });
+      }
+    } else {
+      tx.push({
+        day: Math.min(i.day, dim),
+        label: i.label,
+        amount: i.amount,
+        type: "in",
+        cat: "revenu",
+        inc: false,
+      });
+    }
   }
+
   tx.sort((a, b) => a.day - b.day);
   return tx;
 }
+
+/* ------------------------------------------------------------------ */
+/* Simulation 12 mois                                                  */
+/* ------------------------------------------------------------------ */
 
 /**
  * Simule 12 mois consécutifs à partir de (startY, startM) et du solde de départ.
@@ -128,15 +245,42 @@ export function simulate(state, startY, startM) {
   return out;
 }
 
+/* ------------------------------------------------------------------ */
+/* Agrégats budgétaires d'un mois                                      */
+/* ------------------------------------------------------------------ */
+
 /**
- * Total des dépenses planifiées du mois `m` (indexé 0), par catégorie.
- * @returns {Record<string, number>}
+ * Total des dépenses planifiées du mois (indexé 0), toutes natures confondues.
+ *
+ * @returns {{byCat: Record<string,number>, incByCat: Record<string,number>,
+ *            incompressible: number, discretionnaire: number, total: number}}
  */
-export function expensesByCat(expenses, m) {
-  const map = {};
-  for (const c of CATS) map[c.id] = 0;
-  for (const e of expenses) {
-    if (freqInMonth(e.freq, e.month, m)) map[e.cat] = (map[e.cat] ?? 0) + e.amount;
+export function monthlyExpenses(state, y, m) {
+  const byCat = {};
+  const incByCat = {};
+  for (const c of CATS) {
+    byCat[c.id] = 0;
+    incByCat[c.id] = 0;
   }
-  return map;
+  let incompressible = 0;
+  let total = 0;
+
+  const add = (cat, amount, inc) => {
+    const c = byCat[cat] === undefined ? "exceptionnelles" : cat;
+    byCat[c] += amount;
+    if (inc) {
+      incByCat[c] += amount;
+      incompressible += amount;
+    }
+    total += amount;
+  };
+
+  for (const e of state.expenses) {
+    if (freqInMonth(e.freq, e.month, m)) add(e.cat, e.amount, !!e.incompressible);
+  }
+  for (const x of state.extras ?? []) {
+    if (x.y === y && x.m === m) add(x.cat ?? "exceptionnelles", x.amount, !!x.incompressible);
+  }
+
+  return { byCat, incByCat, incompressible, discretionnaire: total - incompressible, total };
 }
