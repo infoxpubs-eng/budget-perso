@@ -5,7 +5,7 @@
  * Toutes les fonctions sont déterministes à partir des données passées en entrée.
  */
 
-export const CATS = [
+export const ENVELOPPES = [
   { id: "domestiques", label: "Domestiques", color: "#6366f1" },
   { id: "habituelles", label: "Habituelles", color: "#14b8a6" },
   { id: "sports", label: "Sports & autres", color: "#f59e0b" },
@@ -13,6 +13,21 @@ export const CATS = [
   { id: "voyages", label: "Voyages", color: "#0ea5e9" },
   { id: "exceptionnelles", label: "Exceptionnelles", color: "#8b5cf6" },
 ];
+
+import { envelopeOf, taxCat } from "./taxonomie.js";
+
+/**
+ * Correspondance entre les anciennes catégories plates (≤ v0.2.x) et la
+ * nomenclature bancaire à 2 niveaux (v0.3+), utilisée par migrateState.
+ */
+export const LEGACY_CATS = {
+  domestiques: { cat: "logement", sub: "loyers-charges" },
+  habituelles: { cat: "vie-quotidienne", sub: "alimentation" },
+  sports: { cat: "loisirs", sub: "club" },
+  loisirs: { cat: "loisirs", sub: "restaurants" },
+  voyages: { cat: "voyages-transports", sub: "longue-distance" },
+  exceptionnelles: { cat: "logement", sub: "frais-exceptionnels" },
+};
 
 export const MONTHS = [
   "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
@@ -81,8 +96,21 @@ export function salaryPayDay(y, m) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Traduit une ancienne catégorie plate (≤ v0.2.x) en couple (catégorie,
+ * sous-catégorie) de la nomenclature bancaire. Les entrées déjà migrées
+ * ou inconnues sont renvoyées inchangées.
+ */
+function migrateCat(entry) {
+  const legacy = LEGACY_CATS[entry.cat];
+  if (!legacy) return entry;
+  return { ...entry, cat: legacy.cat, sub: entry.sub ?? legacy.sub };
+}
+
+/**
  * Complète un état (chargé du localStorage ou importé) avec les valeurs par
  * défaut des champs ajoutés au fil des versions, sans perdre les données.
+ * Les anciennes catégories plates sont converties vers la nomenclature
+ * bancaire à 2 niveaux (voir LEGACY_CATS).
  */
 export function migrateState(raw) {
   const s = {
@@ -93,16 +121,16 @@ export function migrateState(raw) {
     budgets: { domestiques: 0, habituelles: 0, sports: 0, loisirs: 0, voyages: 0, exceptionnelles: 0 },
     ...(raw ?? {}),
   };
-  s.expenses = (s.expenses ?? []).map((e) => ({ incompressible: false, freq: "mensuelle", ...e }));
-  s.extras = (s.extras ?? []).map((x) => ({
-    cat: "exceptionnelles",
-    incompressible: false,
-    ...x,
-  }));
+  s.expenses = (s.expenses ?? []).map((e) => migrateCat({ incompressible: false, freq: "mensuelle", ...e }));
+  s.extras = (s.extras ?? []).map((x) =>
+    migrateCat({ cat: "exceptionnelles", incompressible: false, ...x })
+  );
   s.incomes = (s.incomes ?? []).map((i) => ({
     mode: i.mode ?? (i.day ? "fixe" : "salaire"),
     treizieme: false,
     bonus: 0,
+    cat: "revenus-travail",
+    sub: "salaire-fixe",
     ...i,
   }));
   return s;
@@ -120,7 +148,7 @@ export function migrateState(raw) {
  * - revenus type "salaire" : versés l'avant-veille du dernier jour ouvré,
  *   avec en option la ½ du 13ᵉ mois en juin et novembre, et un bonus estimé en mars.
  *
- * @returns {Array<{day:number,label:string,amount:number,type:"in"|"out",cat:string,inc:boolean}>}
+ * @returns {Array<{day:number,label:string,amount:number,type:"in"|"out",cat:string,sub?:string,inc:boolean}>}
  */
 export function transactionsOfMonth(state, y, m) {
   const tx = [];
@@ -134,6 +162,7 @@ export function transactionsOfMonth(state, y, m) {
       amount: -e.amount,
       type: "out",
       cat: e.cat,
+      sub: e.sub,
       inc: !!e.incompressible,
     });
   }
@@ -145,7 +174,8 @@ export function transactionsOfMonth(state, y, m) {
       label: x.label,
       amount: -x.amount,
       type: "out",
-      cat: x.cat ?? "exceptionnelles",
+      cat: x.cat ?? "logement",
+      sub: x.sub ?? "frais-exceptionnels",
       inc: !!x.incompressible,
     });
   }
@@ -153,12 +183,12 @@ export function transactionsOfMonth(state, y, m) {
   for (const i of state.incomes) {
     if (i.mode === "salaire") {
       const day = salaryPayDay(y, m);
-      tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: "salaire", inc: false });
+      tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false });
       if (i.treizieme && (m === 5 || m === 10)) {
-        tx.push({ day, label: i.label + " · 13ᵉ mois (½)", amount: i.amount / 2, type: "in", cat: "salaire", inc: false });
+        tx.push({ day, label: i.label + " · 13ᵉ mois (½)", amount: i.amount / 2, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false });
       }
       if ((i.bonus ?? 0) > 0 && m === 2) {
-        tx.push({ day, label: i.label + " · bonus estimé", amount: i.bonus, type: "in", cat: "salaire", inc: false });
+        tx.push({ day, label: i.label + " · bonus estimé", amount: i.bonus, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false });
       }
     } else {
       tx.push({
@@ -166,7 +196,8 @@ export function transactionsOfMonth(state, y, m) {
         label: i.label,
         amount: i.amount,
         type: "in",
-        cat: "revenu",
+        cat: i.cat ?? "revenus-travail",
+        sub: i.sub ?? "salaire-fixe",
         inc: false,
       });
     }
@@ -252,35 +283,54 @@ export function simulate(state, startY, startM) {
 /**
  * Total des dépenses planifiées du mois (indexé 0), toutes natures confondues.
  *
- * @returns {{byCat: Record<string,number>, incByCat: Record<string,number>,
+ * - `byEnv` / `incByEnv` : totaux par enveloppe budgétaire (les 6 historiques).
+ *   Les dépenses récurrentes sont rangées via la nomenclature bancaire
+ *   (voir taxonomie.js → envelopeOf), les dépenses exceptionnelles comptent
+ *   toujours dans l'enveloppe « Exceptionnelles ».
+ * - `byCat` / `incByCat` : totaux par grande catégorie bancaire, toutes
+ *   enveloppes confondues (utile pour le détail par catégorie).
+ *
+ * @returns {{byEnv: Record<string,number>, incByEnv: Record<string,number>,
+ *            byCat: Record<string,number>, incByCat: Record<string,number>,
+ *            detail: Record<string,number>,
  *            incompressible: number, discretionnaire: number, total: number}}
  */
 export function monthlyExpenses(state, y, m) {
+  const byEnv = {};
+  const incByEnv = {};
+  for (const e of ENVELOPPES) {
+    byEnv[e.id] = 0;
+    incByEnv[e.id] = 0;
+  }
   const byCat = {};
   const incByCat = {};
-  for (const c of CATS) {
-    byCat[c.id] = 0;
-    incByCat[c.id] = 0;
-  }
+  const detail = {};
   let incompressible = 0;
   let total = 0;
 
-  const add = (cat, amount, inc) => {
-    const c = byCat[cat] === undefined ? "exceptionnelles" : cat;
-    byCat[c] += amount;
-    if (inc) {
-      incByCat[c] += amount;
-      incompressible += amount;
-    }
+  const add = (env, cat, amount, inc, sub) => {
+    if (byEnv[env] === undefined) env = "exceptionnelles";
+    const c = taxCat(cat) ? cat : "logement";
+    byEnv[env] += amount;
+    incByEnv[env] += inc ? amount : 0;
+    byCat[c] = (byCat[c] ?? 0) + amount;
+    incByCat[c] = (incByCat[c] ?? 0) + (inc ? amount : 0);
+    const k = env + "|" + c + "|" + (sub ?? "");
+    detail[k] = (detail[k] ?? 0) + amount;
+    if (inc) incompressible += amount;
     total += amount;
   };
 
   for (const e of state.expenses) {
-    if (freqInMonth(e.freq, e.month, m)) add(e.cat, e.amount, !!e.incompressible);
+    if (freqInMonth(e.freq, e.month, m)) {
+      add(envelopeOf(e.cat, e.sub), e.cat, e.amount, !!e.incompressible, e.sub);
+    }
   }
   for (const x of state.extras ?? []) {
-    if (x.y === y && x.m === m) add(x.cat ?? "exceptionnelles", x.amount, !!x.incompressible);
+    if (x.y === y && x.m === m) {
+      add("exceptionnelles", x.cat ?? "logement", x.amount, !!x.incompressible, x.sub ?? "frais-exceptionnels");
+    }
   }
 
-  return { byCat, incByCat, incompressible, discretionnaire: total - incompressible, total };
+  return { byEnv, incByEnv, byCat, incByCat, detail, incompressible, discretionnaire: total - incompressible, total };
 }

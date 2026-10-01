@@ -16,7 +16,7 @@ import {
 } from "recharts";
 import { v4 as uuid } from "uuid";
 import {
-  CATS,
+  ENVELOPPES,
   MONTHS,
   fmt,
   monthLabel,
@@ -25,6 +25,7 @@ import {
   migrateState,
   monthlyExpenses,
 } from "./lib/budget.js";
+import { TAXONOMIE, depenseCats, revenuOptions, taxCat, taxSub, labelOf, envelopeOf } from "./lib/taxonomie.js";
 
 /* ============================== Données initiales ============================== */
 
@@ -33,22 +34,22 @@ const now0 = new Date();
 const DEFAULT_STATE = migrateState({
   soldeDepart: 1500,
   expenses: [
-    { id: uuid(), label: "Loyer", amount: 850, day: 3, cat: "domestiques", freq: "mensuelle", incompressible: true },
-    { id: uuid(), label: "Électricité / gaz", amount: 95, day: 8, cat: "domestiques", freq: "mensuelle", incompressible: true },
-    { id: uuid(), label: "Courses (début de mois)", amount: 220, day: 5, cat: "habituelles", freq: "mensuelle", incompressible: true },
-    { id: uuid(), label: "Courses (mi-mois)", amount: 220, day: 20, cat: "habituelles", freq: "mensuelle" },
-    { id: uuid(), label: "Internet + mobile", amount: 45, day: 12, cat: "habituelles", freq: "mensuelle", incompressible: true },
-    { id: uuid(), label: "Salle de sport", amount: 30, day: 1, cat: "sports", freq: "mensuelle", incompressible: true },
-    { id: uuid(), label: "Streaming & abonnements", amount: 25, day: 15, cat: "loisirs", freq: "mensuelle" },
-    { id: uuid(), label: "Sorties / restaurants", amount: 80, day: 25, cat: "loisirs", freq: "mensuelle" },
-    { id: uuid(), label: "Vacances d'été", amount: 1200, day: 2, cat: "voyages", freq: "annuelle", month: 7 },
+    { id: uuid(), label: "Loyer", amount: 850, day: 3, cat: "logement", sub: "loyers-charges", freq: "mensuelle", incompressible: true },
+    { id: uuid(), label: "Électricité / gaz", amount: 95, day: 8, cat: "logement", sub: "energie", freq: "mensuelle", incompressible: true },
+    { id: uuid(), label: "Courses (début de mois)", amount: 220, day: 5, cat: "vie-quotidienne", sub: "alimentation", freq: "mensuelle", incompressible: true },
+    { id: uuid(), label: "Courses (mi-mois)", amount: 220, day: 20, cat: "vie-quotidienne", sub: "alimentation", freq: "mensuelle" },
+    { id: uuid(), label: "Internet + mobile", amount: 45, day: 12, cat: "abonnements", sub: "multimedia", freq: "mensuelle", incompressible: true },
+    { id: uuid(), label: "Salle de sport", amount: 30, day: 1, cat: "loisirs", sub: "club", freq: "mensuelle", incompressible: true },
+    { id: uuid(), label: "Streaming & abonnements", amount: 25, day: 15, cat: "loisirs", sub: "culture", freq: "mensuelle" },
+    { id: uuid(), label: "Sorties / restaurants", amount: 80, day: 25, cat: "loisirs", sub: "restaurants", freq: "mensuelle" },
+    { id: uuid(), label: "Vacances d'été", amount: 1200, day: 2, cat: "voyages-transports", sub: "hebergement", freq: "annuelle", month: 7 },
   ],
   incomes: [
     { id: uuid(), label: "Salaire", amount: 2500, mode: "salaire", treizieme: true, bonus: 1000 },
     { id: uuid(), label: "Aide / allocations", amount: 180, day: 5, mode: "fixe" },
   ],
   extras: [
-    { id: uuid(), label: "Réparation voiture", amount: 350, day: 18, y: now0.getFullYear(), m: now0.getMonth(), cat: "exceptionnelles" },
+    { id: uuid(), label: "Réparation voiture", amount: 350, day: 18, y: now0.getFullYear(), m: now0.getMonth(), cat: "auto-moto", sub: "entretien" },
   ],
   budgets: { domestiques: 1000, habituelles: 500, sports: 50, loisirs: 120, voyages: 100, exceptionnelles: 300 },
 });
@@ -271,9 +272,19 @@ export default function App() {
     }
   };
 
-  // Dépenses planifiées du mois par catégorie + répartition incompressible
+  // Dépenses planifiées du mois par enveloppe + répartition incompressible
   const agg = useMemo(() => monthlyExpenses(state, sim.y, sim.m), [state, sim.y, sim.m]);
-  const byCat = agg.byCat;
+  const byEnv = agg.byEnv;
+
+  // Détail par catégorie bancaire pour chaque enveloppe ("env|cat|sub" → montant)
+  const detailOf = (envId) =>
+    Object.entries(agg.detail)
+      .filter(([k]) => k.split("|")[0] === envId)
+      .map(([k, amount]) => {
+        const [, cat, sub] = k.split("|");
+        return { cat, sub, amount };
+      })
+      .sort((a, b) => b.amount - a.amount);
 
   const dailyFlow = sim.daily
     .filter((d) => d.day > 0)
@@ -500,7 +511,9 @@ export default function App() {
                 <h2 className="mb-3 font-semibold">Dépenses récurrentes ({state.expenses.length})</h2>
                 <div className="space-y-2">
                   {state.expenses.map((e) => {
-                    const cat = CATS.find((c) => c.id === e.cat);
+                    const c = taxCat(e.cat);
+                    const s = taxSub(e.cat, e.sub);
+                    const env = ENVELOPPES.find((x) => x.id === envelopeOf(e.cat, e.sub));
                     return (
                       <div key={e.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
                         <div className="min-w-0">
@@ -509,7 +522,8 @@ export default function App() {
                             <span>Le {e.day} du mois</span>
                             <span>·</span>
                             {e.freq === "annuelle" ? <span>{MONTHS[(e.month ?? 1) - 1]}</span> : <span>Chaque mois</span>}
-                            <Badge color={cat ? cat.color : "#94a3b8"}>{cat ? cat.label : "?"}</Badge>
+                            <Badge color={env ? env.color : "#94a3b8"}>{c ? c.label : "?"}</Badge>
+                            {s && <span>{s.label}</span>}
                             {e.incompressible && <IncBadge />}
                           </div>
                         </div>
@@ -539,14 +553,17 @@ export default function App() {
                 <p className="mb-3 text-xs text-slate-500">Dépenses unitaires, à une date précise.</p>
                 <div className="space-y-2">
                   {state.extras.map((x) => {
-                    const cat = CATS.find((c) => c.id === (x.cat ?? "exceptionnelles"));
+                    const c = taxCat(x.cat);
+                    const s = taxSub(x.cat, x.sub);
+                    const env = ENVELOPPES.find((x2) => x2.id === "exceptionnelles");
                     return (
                       <div key={x.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
                         <div className="min-w-0">
                           <div className="truncate text-sm font-medium">{x.label}</div>
                           <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
                             <span>{monthLabel(x.y, x.m)} · le {x.day}</span>
-                            <Badge color={cat ? cat.color : "#94a3b8"}>{cat ? cat.label : "?"}</Badge>
+                            <Badge color={env ? env.color : "#94a3b8"}>{c ? c.label : "?"}</Badge>
+                            {s && <span>{s.label}</span>}
                             {x.incompressible && <IncBadge />}
                           </div>
                         </div>
@@ -604,6 +621,7 @@ export default function App() {
                         ) : (
                           <span>Le {i.day} du mois</span>
                         )}
+                        {i.cat && <Badge color="#10b981">{labelOf(i.cat, i.sub)}</Badge>}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -637,13 +655,15 @@ export default function App() {
               <h2 className="mb-1 font-semibold">Budget prévisionnel — {sim.label}</h2>
               <p className="mb-4 text-xs text-slate-500">
                 Comparez l'enveloppe que vous souhaitez consacrer à chaque type de dépenses avec le total réellement planifié ce mois-ci (récurrentes + exceptionnelles).
+                Les dépenses sont rangées automatiquement par catégorie bancaire.
               </p>
               <div className="space-y-4">
-                {CATS.map((c) => {
-                  const planned = byCat[c.id] ?? 0;
+                {ENVELOPPES.map((c) => {
+                  const planned = byEnv[c.id] ?? 0;
                   const budget = state.budgets[c.id] ?? 0;
                   const pct = budget > 0 ? Math.min(100, (planned / budget) * 100) : planned > 0 ? 100 : 0;
                   const over = planned > budget;
+                  const detail = detailOf(c.id);
                   return (
                     <div key={c.id}>
                       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
@@ -675,6 +695,15 @@ export default function App() {
                           style={{ width: pct + "%", backgroundColor: over ? "#f43f5e" : c.color }}
                         />
                       </div>
+                      {detail.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                          {detail.map((d, i) => (
+                            <span key={i}>
+                              {labelOf(d.cat, d.sub)} : <span className="font-medium text-slate-700">{fmt(d.amount)}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -714,11 +743,11 @@ export default function App() {
               </Card>
 
               <Card>
-                <h2 className="mb-3 font-semibold">Répartition des dépenses du mois par catégorie</h2>
+                <h2 className="mb-3 font-semibold">Répartition des dépenses du mois par enveloppe</h2>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
-                      data={CATS.map((c) => ({ label: c.label, total: byCat[c.id] ?? 0, color: c.color }))}
+                      data={ENVELOPPES.map((c) => ({ label: c.label, total: byEnv[c.id] ?? 0, color: c.color }))}
                       margin={{ top: 10, right: 10, bottom: 4, left: 8 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -726,7 +755,7 @@ export default function App() {
                       <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => v + "€"} width={56} />
                       <Tooltip content={<SimpleTooltip />} />
                       <Bar dataKey="total" radius={[6, 6, 0, 0]}>
-                        {CATS.map((c) => (
+                        {ENVELOPPES.map((c) => (
                           <Cell key={c.id} fill={c.color} />
                         ))}
                       </Bar>
@@ -745,13 +774,23 @@ export default function App() {
 /* ============================== Formulaires ============================== */
 
 function ExpenseForm({ onAdd }) {
+  const DEPCATS = useMemo(() => depenseCats(), []);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState(0);
   const [day, setDay] = useState(1);
-  const [cat, setCat] = useState("domestiques");
+  const [cat, setCat] = useState("logement");
+  const [sub, setSub] = useState("loyers-charges");
   const [freq, setFreq] = useState("mensuelle");
   const [month, setMonth] = useState(1);
   const [inc, setInc] = useState(false);
+
+  const subs = DEPCATS.find((c) => c.id === cat)?.subs ?? [];
+
+  const changeCat = (id) => {
+    setCat(id);
+    const first = DEPCATS.find((c) => c.id === id)?.subs[0]?.id ?? "";
+    setSub(first);
+  };
 
   const submit = () => {
     if (!label.trim() || amount <= 0) return;
@@ -761,6 +800,7 @@ function ExpenseForm({ onAdd }) {
       amount,
       day: Math.min(31, Math.max(1, day)),
       cat,
+      sub: sub || undefined,
       freq,
       month: freq === "annuelle" ? month : undefined,
       incompressible: inc,
@@ -793,13 +833,23 @@ function ExpenseForm({ onAdd }) {
             />
           </Field>
         </div>
-        <Field label="Type">
-          <select className={inputCls} value={cat} onChange={(e) => setCat(e.target.value)}>
-            {CATS.map((c) => (
-              <option key={c.id} value={c.id}>{c.label}</option>
-            ))}
-          </select>
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Catégorie">
+            <select className={inputCls} value={cat} onChange={(e) => changeCat(e.target.value)}>
+              {DEPCATS.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Sous-catégorie">
+            <select className={inputCls} value={sub} onChange={(e) => setSub(e.target.value)} disabled={subs.length === 0}>
+              {subs.length === 0 && <option value="">—</option>}
+              {subs.map((s) => (
+                <option key={s.id} value={s.id}>{s.label}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Fréquence">
             <select className={inputCls} value={freq} onChange={(e) => setFreq(e.target.value)}>
@@ -831,15 +881,25 @@ function ExpenseForm({ onAdd }) {
 }
 
 function ExtraForm({ sims, monthIdx, onAdd }) {
+  const DEPCATS = useMemo(() => depenseCats(), []);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState(0);
   const [day, setDay] = useState(1);
   const [simIdx, setSimIdx] = useState(monthIdx);
-  const [cat, setCat] = useState("exceptionnelles");
+  const [cat, setCat] = useState("logement");
+  const [sub, setSub] = useState("frais-exceptionnels");
   const [inc, setInc] = useState(false);
 
   // Suit le mois sélectionné en en-tête tant que l'utilisateur n'a pas choisi
   useEffect(() => { setSimIdx(monthIdx); }, [monthIdx]);
+
+  const subs = DEPCATS.find((c) => c.id === cat)?.subs ?? [];
+
+  const changeCat = (id) => {
+    setCat(id);
+    const first = DEPCATS.find((c) => c.id === id)?.subs[0]?.id ?? "";
+    setSub(first);
+  };
 
   const target = sims[Math.min(simIdx, 11)];
   const submit = () => {
@@ -852,6 +912,7 @@ function ExtraForm({ sims, monthIdx, onAdd }) {
       y: target.y,
       m: target.m,
       cat,
+      sub: sub || undefined,
       incompressible: inc,
     });
     setLabel("");
@@ -890,13 +951,23 @@ function ExtraForm({ sims, monthIdx, onAdd }) {
             ))}
           </select>
         </Field>
-        <Field label="Type">
-          <select className={inputCls} value={cat} onChange={(e) => setCat(e.target.value)}>
-            {CATS.map((c) => (
-              <option key={c.id} value={c.id}>{c.label}</option>
-            ))}
-          </select>
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Catégorie">
+            <select className={inputCls} value={cat} onChange={(e) => changeCat(e.target.value)}>
+              {DEPCATS.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Sous-catégorie">
+            <select className={inputCls} value={sub} onChange={(e) => setSub(e.target.value)} disabled={subs.length === 0}>
+              {subs.length === 0 && <option value="">—</option>}
+              {subs.map((s) => (
+                <option key={s.id} value={s.id}>{s.label}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
         <CheckRow checked={inc} onChange={setInc} label="Dépense incompressible 🔒" />
         <button
           className="w-full rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
@@ -911,15 +982,18 @@ function ExtraForm({ sims, monthIdx, onAdd }) {
 }
 
 function IncomeForm({ onAdd }) {
+  const ROPTS = useMemo(() => revenuOptions(), []);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState(0);
   const [mode, setMode] = useState("salaire");
   const [day, setDay] = useState(27);
   const [treizieme, setTreizieme] = useState(false);
   const [bonus, setBonus] = useState(0);
+  const [rcat, setRcat] = useState("revenus-travail|salaire-fixe");
 
   const submit = () => {
     if (!label.trim() || amount <= 0) return;
+    const [cat, sub] = rcat.split("|");
     onAdd({
       id: uuid(),
       label: label.trim(),
@@ -928,6 +1002,8 @@ function IncomeForm({ onAdd }) {
       day: mode === "fixe" ? Math.min(31, Math.max(1, day)) : undefined,
       treizieme: mode === "salaire" ? treizieme : false,
       bonus: mode === "salaire" ? bonus : 0,
+      cat,
+      sub: sub || undefined,
     });
     setLabel("");
     setAmount(0);
@@ -965,6 +1041,13 @@ function IncomeForm({ onAdd }) {
             />
           </Field>
         )}
+        <Field label="Catégorie bancaire">
+          <select className={inputCls} value={rcat} onChange={(e) => setRcat(e.target.value)}>
+            {ROPTS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </Field>
         {mode === "salaire" && (
           <div className="space-y-2 rounded-lg bg-slate-50 p-3">
             <CheckRow

@@ -5,9 +5,11 @@ Application React de gestion de budget personnel qui répond à une question sim
 
 ## Fonctionnalités
 
-- **Dépenses récurrentes** : montant, jour de débit (1–31), catégorie, fréquence mensuelle ou annuelle
+- **Nomenclature bancaire à 2 niveaux** : chaque dépense est classée par **catégorie** (Logement, Vie quotidienne, Loisirs, Voyages et Transports, Santé, Abonnements et téléphonie, Services financiers, Impôts et Taxes, Auto et Moto, Cadeaux et solidarité, Emprunts, Dépenses d'épargne, Frais professionnels, Virements, Retraits, Mouvements internes…) et **sous-catégorie** (issue du relevé bancaire)
+- **Dépenses récurrentes** : montant, jour de débit (1–31), catégorie bancaire, fréquence mensuelle ou annuelle
 - **Dépenses exceptionnelles** : dépenses unitaires à date précise, catégorisées, intégrées à la simulation et au budget
 - **Dépenses incompressibles** 🔒 : marqueur sur chaque dépense, visualisation incompressible vs discrétionnaire
+- **6 enveloppes budgétaires** (Domestiques, Habituelles, Sports & autres, Loisirs, Voyages, Exceptionnelles) : chaque dépense est rangée automatiquement dans son enveloppe via sa catégorie bancaire ; l'onglet Budget affiche le détail des catégories qui alimentent chaque enveloppe
 - **Revenus** :
   - à **jour fixe** du mois
   - ou type **« salaire »**, versé **l'avant-veille du dernier jour ouvré du mois** (calcul automatique, week-ends franchis)
@@ -40,13 +42,14 @@ npm test          # lance la suite de tests (Vitest)
 ├── vite.config.js          # Vite + Tailwind CSS v4 + configuration Vitest
 ├── src/
 │   ├── main.jsx            # point d'entrée React
-│   ├── index.css           # impo
-rt Tailwind
+│   ├── index.css           # import Tailwind
 │   ├── App.jsx             # interface complète (onglets, graphiques, formulaires)
 │   └── lib/
 │       ├── budget.js       # logique métier pure (simulation, agrégats) — sans React
+│       ├── taxonomie.js    # nomenclature bancaire à 2 niveaux (catégories, sous-catégories, enveloppes)
 │       └── budget.test.js  # tests unitaires Vitest de la logique métier
-└── .github/workflows/ci.yml  # CI : les tests tournent à chaque push
+├── .github/workflows/ci.yml      # CI : tests + build à chaque push
+└── .github/workflows/deploy.yml  # déploiement GitHub Pages à chaque push sur main
 ```
 
 ## Logique métier (`src/lib/budget.js`)
@@ -60,29 +63,40 @@ Module **sans dépendance React**, donc testable isolément :
 | `freqInMonth(freq, month, m)` | Une écriture tombe-t-elle dans ce mois ? |
 | `isBusinessDay`, `lastBusinessDay` | Jours ouvrés (semaine de 5 jours) |
 | `salaryPayDay(y, m)` | Jour de paie : avant-veille du dernier jour ouvré |
-| `migrateState(raw)` | Complète une sauvegarde avec les valeurs par défaut des nouveaux champs |
+| `migrateState(raw)` | Complète une sauvegarde, convertit les anciennes catégories plates vers la nomenclature bancaire (`LEGACY_CATS`) |
 | `transactionsOfMonth(state, y, m)` | Opérations du mois : récurrentes + exceptionnelles + salaires (13ᵉ mois, bonus) |
 | `simulate(state, startY, startM)` | Simulation de 12 mois enchaînés : solde quotidien, point bas, totaux |
-| `monthlyExpenses(state, y, m)` | Totaux par catégorie + répartition incompressible / discrétionnaire |
+| `monthlyExpenses(state, y, m)` | Totaux par enveloppe (`byEnv`), par catégorie bancaire (`byCat`), détail `env\|cat\|sub` et répartition incompressible / discrétionnaire |
+
+`src/lib/taxonomie.js` fournit la nomenclature bancaire à 2 niveaux :
+
+| Fonction | Rôle |
+|---|---|
+| `TAXONOMIE` | Les 22 catégories (nature dépense/revenu) et leurs sous-catégories |
+| `envelopeOf(catId, subId)` | Enveloppe budgétaire d'une dépense (sous-catégorie prioritaire) |
+| `depenseCats()` | Catégories éligibles au formulaire de dépense |
+| `revenuOptions()` | Options « Catégorie — Sous-catégorie » pour les revenus |
+| `labelOf(catId, subId)` | Libellé lisible d'un couple catégorie / sous-catégorie |
 
 Le modèle de données est volontairement simple :
 
 ```js
 {
   soldeDepart: 1500,
-  expenses: [{ id, label, amount, day, cat, freq, month?, incompressible? }], // récurrentes
-  extras:    [{ id, label, amount, day, y, m, cat, incompressible? }],        // exceptionnelles
+  expenses: [{ id, label, amount, day, cat, sub, freq, month?, incompressible? }], // récurrentes
+  extras:    [{ id, label, amount, day, y, m, cat, sub, incompressible? }],        // exceptionnelles
   incomes:  [{ id, label, amount, mode: "fixe" | "salaire", day?,             // jour fixe si "fixe"
                treizieme?,   // true => ½ du salaire en plus en juin et novembre
-               bonus? }],    // montant versé avec le salaire de mars
-  budgets:  { domestiques: 1000, ..., exceptionnelles: 300 }
+               bonus?,       // montant versé avec le salaire de mars
+               cat?, sub? }], // catégorie bancaire optionnelle (Revenus du travail, etc.)
+  budgets:  { domestiques: 1000, habituelles: 500, sports: 50, loisirs: 120, voyages: 100, exceptionnelles: 300 }
 }
 ```
 
 ## Tests
 
-La suite couvre : années bissextiles, tri et signe des opérations, exclusion des dépenses annuelles hors de leur mois, clamp du jour 
-31, jours de paie (dont franchissement de week-end), 13ᵉ mois en juin/novembre, bonus de mars, dépenses exceptionnelles, enchaînement des soldes d'un mois à l'autre, détection de découvert, passage à l'année suivante, migration des anciennes sauvegardes et agrégats incompressible/discrétionnaire.
+La suite couvre : années bissextiles, tri et signe des opérations, exclusion des dépenses annuelles hors de leur mois, clamp du jour
+31, jours de paie (dont franchissement de week-end), 13ᵉ mois en juin/novembre, bonus de mars, dépenses exceptionnelles, enchaînement des soldes d'un mois à l'autre, détection de découvert, passage à l'année suivante, migration des anciennes sauvegardes (dont conversion des anciennes catégories plates), intégrité de la nomenclature bancaire, rattachement des enveloppes et agrégats incompressible/discrétionnaire. **43 tests** au total.
 
 ```bash
 npm test            # une seule exécution

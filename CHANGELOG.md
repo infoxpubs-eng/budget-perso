@@ -12,6 +12,23 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.3.0] — 2026-10-01
+
+### Ajouté
+
+- **Nomenclature bancaire à 2 niveaux** (`src/lib/taxonomie.js`) : 22 grandes catégories et ~48 sous-catégories alignées sur le relevé bancaire (Logement, Vie quotidienne, Loisirs, Voyages et Transports, Santé, Abonnements et téléphonie, Services financiers, Impôts et Taxes, Auto et Moto, Cadeaux et solidarité, Emprunts, Dépenses d'épargne, Frais professionnels, Virements, Retraits, Mouvements internes, Revenus…)
+- **Sélecteurs Catégorie + Sous-catégorie** dans les formulaires de dépenses récurrentes et exceptionnelles ; badge catégorie + sous-catégorie dans les listes
+- **Catégorie bancaire optionnelle sur les revenus** (select « Catégorie bancaire » : Revenus du travail, Revenus d'épargne, Remboursements, Virements reçus, Mouvements internes créditeurs, Remboursement impôts…), affichée en badge dans la liste
+- **Détail par catégorie bancaire sous chaque enveloppe** dans l'onglet Budget (quelles catégories alimentent chaque enveloppe et pour quels montants)
+- 10 nouveaux tests (43 au total) : intégrité de la taxonomie, rattachement enveloppes, migration des anciennes catégories, ventilation par catégorie bancaire
+
+### Modifié
+
+- Les 6 **enveloppes budgétaires** (Domestiques, Habituelles, Sports & autres, Loisirs, Voyages, Exceptionnelles) sont conservées : chaque dépense est rangée automatiquement dans son enveloppe via sa catégorie bancaire (`envelopeOf`), les dépenses exceptionnelles restant dans « Exceptionnelles »
+- `CATS` (6 catégories plates) remplacé par `ENVELOPPES` ; `monthlyExpenses` renvoie désormais `byEnv` / `incByEnv` (enveloppes), `byCat` / `incByCat` (catégories bancaires) et `detail` (`env|cat|sub` → montant)
+- `migrateState` convertit automatiquement les anciennes catégories plates vers la nomenclature bancaire (`LEGACY_CATS`) : une sauvegarde v0.2.x est utilisable telle quelle en v0.3.0
+- La sous-catégorie « Club / association » alimente l'enveloppe « Sports & autres » ; les autres sous-catégories suivent la catégorie
+
 ## [0.2.1] — 2026-10-01
 
 ### Ajouté

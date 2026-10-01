@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  CATS,
+  ENVELOPPES,
+  LEGACY_CATS,
   daysInMonth,
   monthLabel,
   freqInMonth,
@@ -12,6 +13,15 @@ import {
   simulate,
   monthlyExpenses,
 } from "./budget.js";
+import {
+  TAXONOMIE,
+  envelopeOf,
+  taxCat,
+  taxSub,
+  depenseCats,
+  revenuOptions,
+  labelOf,
+} from "./taxonomie.js";
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -22,9 +32,9 @@ function baseState() {
   return {
     soldeDepart: 1000,
     expenses: [
-      { id: "e1", label: "Loyer", amount: 800, day: 3, cat: "domestiques", freq: "mensuelle", incompressible: true },
-      { id: "e2", label: "Courses", amount: 200, day: 15, cat: "habituelles", freq: "mensuelle" },
-      { id: "e3", label: "Vacances", amount: 900, day: 10, cat: "voyages", freq: "annuelle", month: 7 },
+      { id: "e1", label: "Loyer", amount: 800, day: 3, cat: "logement", sub: "loyers-charges", freq: "mensuelle", incompressible: true },
+      { id: "e2", label: "Courses", amount: 200, day: 15, cat: "vie-quotidienne", sub: "alimentation", freq: "mensuelle" },
+      { id: "e3", label: "Vacances", amount: 900, day: 10, cat: "voyages-transports", sub: "hebergement", freq: "annuelle", month: 7 },
     ],
     incomes: [
       { id: "i1", label: "Salaire", amount: 2000, day: 27, mode: "fixe" },
@@ -131,6 +141,40 @@ describe("migrateState", () => {
     expect(s.incomes[0].bonus).toBe(0);
     expect(Array.isArray(s.extras)).toBe(true);
     expect(s.budgets.domestiques).toBe(800);
+  });
+
+  it("convertit les anciennes catégories plates vers la nomenclature bancaire", () => {
+    const old = {
+      expenses: [
+        { id: "a", label: "Loyer", amount: 700, day: 1, cat: "domestiques", freq: "mensuelle" },
+        { id: "b", label: "Salle de sport", amount: 30, day: 1, cat: "sports", freq: "mensuelle" },
+        { id: "c", label: "Resto", amount: 40, day: 2, cat: "loisirs", freq: "mensuelle" },
+      ],
+      extras: [{ id: "d", label: "Imprévu", amount: 90, day: 4, y: 2026, m: 2 }],
+    };
+    const s = migrateState(old);
+    expect(s.expenses[0].cat).toBe("logement");
+    expect(s.expenses[0].sub).toBe("loyers-charges");
+    expect(s.expenses[1].cat).toBe("loisirs");
+    expect(s.expenses[1].sub).toBe("club");
+    expect(s.expenses[2].sub).toBe("restaurants");
+    // extras sans catégorie : ancien défaut "exceptionnelles" → Logement / frais exceptionnels
+    expect(s.extras[0].cat).toBe("logement");
+    expect(s.extras[0].sub).toBe("frais-exceptionnels");
+  });
+
+  it("ne touche pas une entrée déjà en nomenclature bancaire", () => {
+    const s = migrateState({
+      expenses: [{ id: "a", label: "Taxi", amount: 20, day: 3, cat: "voyages-transports", sub: "taxis", freq: "mensuelle" }],
+    });
+    expect(s.expenses[0].cat).toBe("voyages-transports");
+    expect(s.expenses[0].sub).toBe("taxis");
+  });
+
+  it("dote les revenus d'une catégorie bancaire par défaut", () => {
+    const s = migrateState({ incomes: [{ id: "x", label: "Salaire", amount: 2000, mode: "salaire" }] });
+    expect(s.incomes[0].cat).toBe("revenus-travail");
+    expect(s.incomes[0].sub).toBe("salaire-fixe");
   });
 
   it("remplit un état vide avec des valeurs sûres", () => {
@@ -312,21 +356,39 @@ describe("simulate", () => {
 /* ------------------------------------------------------------------ */
 
 describe("monthlyExpenses", () => {
-  it("regroupe les dépenses récurrentes du mois par catégorie", () => {
+  it("regroupe les dépenses récurrentes du mois par enveloppe", () => {
     const state = baseState();
     const agg = monthlyExpenses(state, 2026, 0); // janvier
-    expect(agg.byCat.domestiques).toBe(800);
-    expect(agg.byCat.habituelles).toBe(200);
-    expect(agg.byCat.voyages).toBe(0); // annuelle, pas en janvier
+    expect(agg.byEnv.domestiques).toBe(800); // loyer → Logement → Domestiques
+    expect(agg.byEnv.habituelles).toBe(200); // courses → Vie quotidienne → Habituelles
+    expect(agg.byEnv.voyages).toBe(0); // annuelle, pas en janvier
   });
 
-  it("inclut les dépenses exceptionnelles du mois", () => {
+  it("ventile aussi les totaux par catégorie bancaire", () => {
+    const agg = monthlyExpenses(baseState(), 2026, 0);
+    expect(agg.byCat.logement).toBe(800);
+    expect(agg.byCat["vie-quotidienne"]).toBe(200);
+    expect(agg.byCat["voyages-transports"]).toBeUndefined(); // rien ce mois-ci
+    expect(agg.detail["domestiques|logement|loyers-charges"]).toBe(800);
+  });
+
+  it("range une sous-catégorie dans l'enveloppe redéfinie (club → sports)", () => {
     const state = baseState();
-    state.extras.push({ id: "x1", label: "Réparation voiture", amount: 400, day: 18, y: 2026, m: 9, cat: "exceptionnelles" });
+    state.expenses.push({ id: "e4", label: "Salle de sport", amount: 30, day: 1, cat: "loisirs", sub: "club", freq: "mensuelle" });
+    state.expenses.push({ id: "e5", label: "Resto", amount: 40, day: 2, cat: "loisirs", sub: "restaurants", freq: "mensuelle" });
+    const agg = monthlyExpenses(state, 2026, 0);
+    expect(agg.byEnv.sports).toBe(30);
+    expect(agg.byEnv.loisirs).toBe(40);
+  });
+
+  it("inclut les dépenses exceptionnelles dans l'enveloppe Exceptionnelles", () => {
+    const state = baseState();
+    state.extras.push({ id: "x1", label: "Réparation voiture", amount: 400, day: 18, y: 2026, m: 9, cat: "auto-moto", sub: "entretien" });
     const oct = monthlyExpenses(state, 2026, 9);
     const jan = monthlyExpenses(state, 2026, 0);
-    expect(oct.byCat.exceptionnelles).toBe(400);
-    expect(jan.byCat.exceptionnelles).toBe(0);
+    expect(oct.byEnv.exceptionnelles).toBe(400);
+    expect(oct.byCat["auto-moto"]).toBe(400); // la catégorie bancaire reste visible
+    expect(jan.byEnv.exceptionnelles).toBe(0);
   });
 
   it("sépare l'incompressible du discrétionnaire", () => {
@@ -337,11 +399,59 @@ describe("monthlyExpenses", () => {
     expect(agg.incompressible).toBe(800);
     expect(agg.discretionnaire).toBe(200);
     expect(agg.total).toBe(1000);
-    expect(agg.incByCat.domestiques).toBe(800);
+    expect(agg.incByEnv.domestiques).toBe(800);
   });
 
-  it("couvre toutes les catégories, même vides", () => {
+  it("couvre toutes les enveloppes, même vides", () => {
     const agg = monthlyExpenses(baseState(), 2026, 0);
-    expect(Object.keys(agg.byCat).sort()).toEqual(CATS.map((c) => c.id).sort());
+    expect(Object.keys(agg.byEnv).sort()).toEqual(ENVELOPPES.map((c) => c.id).sort());
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* taxonomie                                                           */
+/* ------------------------------------------------------------------ */
+
+describe("taxonomie bancaire", () => {
+  it("a des identifiants uniques et des sous-catégories rattachées", () => {
+    const ids = TAXONOMIE.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const c of TAXONOMIE) {
+      const subIds = c.subs.map((s) => s.id);
+      expect(new Set(subIds).size).toBe(subIds.length);
+      for (const s of c.subs) expect(s.label).toBeTruthy();
+      expect(c.nature === "depense" || c.nature === "revenu").toBe(true);
+    }
+  });
+
+  it("rattache chaque catégorie de dépense à une enveloppe existante", () => {
+    const envIds = new Set(ENVELOPPES.map((e) => e.id));
+    for (const c of TAXONOMIE) {
+      if (c.nature === "depense") {
+        expect(envIds.has(envelopeOf(c.id))).toBe(true);
+      }
+    }
+  });
+
+  it("exclut « Remboursement impôts » des dépenses et la propose comme revenu", () => {
+    const dep = depenseCats().find((c) => c.id === "impots-taxes");
+    expect(dep.subs.map((s) => s.id)).toEqual(["impots-autres"]);
+    const ropts = revenuOptions().map((o) => o.value);
+    expect(ropts).toContain("impots-taxes|remb-impots");
+    expect(ropts).toContain("revenus-travail|salaire-fixe");
+    expect(ropts).toContain("virements-recus|");
+  });
+
+  it("libelle un couple catégorie / sous-catégorie", () => {
+    expect(labelOf("loisirs", "restaurants")).toBe("Loisirs · Restaurants, bars, discothèques…");
+    expect(labelOf("virements-recus")).toBe("Virements reçus");
+    expect(labelOf("inconnu")).toBe("?");
+  });
+
+  it("correspondance des anciennes catégories : cibles valides uniquement", () => {
+    for (const v of Object.values(LEGACY_CATS)) {
+      expect(taxCat(v.cat)).toBeTruthy();
+      expect(taxSub(v.cat, v.sub)).toBeTruthy();
+    }
   });
 });
