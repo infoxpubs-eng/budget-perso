@@ -12,6 +12,18 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.12.0] — 2026-10-03
+
+### Ajouté
+
+- **Renommage** (✏️) des catégories et sous-catégories depuis la console d'administration : édition en ligne (Entrée pour valider, Échap pour annuler), doublons refusés ; l'identifiant technique est inchangé, les écritures existantes suivent le nouveau libellé
+- **Activation / désactivation** (⏸️ / ▶️) des catégories et sous-catégories, **sans suppression** :
+  - un élément désactivé (grisé, badge « désactivée ») disparaît des formulaires de dépense/revenu, du formulaire d'ajout de couple et de la reconnaissance de l'import CSV
+  - les dépenses existantes conservent leurs données : libellés et enveloppes restent résolus à l'affichage et les montants restent comptés dans les totaux du mois
+  - réversible en un clic ; le filtre « active » exclut aussi les sous-catégories des options de revenu
+- Nouvelles fonctions dans `taxonomie.js` : `renameCategory`, `renameSubcategory`, `setCategoryActive`, `setSubActive` (pures) ; `depenseCats`, `revenuOptions`, `catByLabel`, `subByLabel`, `subByOperation` ignorent les éléments désactivés ; `migrateState` normalise le drapeau `active`
+- Corrigé au passage : `migrateState` n'appliquait pas la normalisation (indicateurs, champs manquants) à la nomenclature par défaut d'un état sans `taxonomie`
+
 ## [0.11.0] — 2026-10-03
 
 ### Ajouté

@@ -40,6 +40,10 @@ import {
   addCategory,
   addSubcategory,
   setSubFlags,
+  renameCategory,
+  renameSubcategory,
+  setCategoryActive,
+  setSubActive,
 } from "./lib/taxonomie.js";
 import { parseCsv, rowsToEntries } from "./lib/import-csv.js";
 
@@ -1367,6 +1371,9 @@ function AdminPanel({ state, setState }) {
   const [incompressible, setIncompressible] = useState(false);
   const [err, setErr] = useState("");
   const [okMsg, setOkMsg] = useState("");
+  // Élément en cours de renommage : { type: "cat"|"sub", catId, subId? }
+  const [editing, setEditing] = useState(null);
+  const [editLabel, setEditLabel] = useState("");
 
   const toggleFlag = (cid, sub, flag) =>
     setState((s) => ({
@@ -1376,6 +1383,48 @@ function AdminPanel({ state, setState }) {
         incompressible: flag === "incompressible" ? !sub.incompressible : !!sub.incompressible,
       }),
     }));
+
+  const startEdit = (type, cid, sid, current) => {
+    setEditing({ type, catId: cid, subId: sid });
+    setEditLabel(current);
+    setErr("");
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setEditLabel("");
+  };
+
+  const confirmEdit = () => {
+    setErr("");
+    try {
+      setState((s) => ({
+        ...s,
+        taxonomie:
+          editing.type === "cat"
+            ? renameCategory(s.taxonomie ?? taxo, editing.catId, editLabel)
+            : renameSubcategory(s.taxonomie ?? taxo, editing.catId, editing.subId, editLabel),
+      }));
+      setEditing(null);
+      setEditLabel("");
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
+
+  const toggleActive = (cid, sid, active) => {
+    setErr("");
+    try {
+      setState((s) => ({
+        ...s,
+        taxonomie: sid
+          ? setSubActive(s.taxonomie ?? taxo, cid, sid, active)
+          : setCategoryActive(s.taxonomie ?? taxo, cid, active),
+      }));
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
 
   const submit = () => {
     setErr("");
@@ -1415,9 +1464,12 @@ function AdminPanel({ state, setState }) {
         <Card>
           <h2 className="mb-1 font-semibold">Nomenclature — catégories et sous-catégories</h2>
           <p className="mb-4 text-xs text-slate-500">
-            Cliquez sur 🔁 ou 🔒 pour marquer une sous-catégorie récurrente ou incompressible.
+            Cliquez sur 🔁 ou 🔒 pour marquer une sous-catégorie récurrente ou incompressible ;
+            sur ✏️ pour renommer ; sur ⏸️ pour désactiver (▶️ pour réactiver).
             Une sous-catégorie incompressible rend toutes ses dépenses incompressibles dans les
             totaux du mois et coche automatiquement « incompressible » dans les formulaires.
+            Un élément désactivé disparaît des formulaires et de l'import CSV, mais les dépenses
+            existantes conservent leurs données et restent comptées dans les totaux.
           </p>
           <div className="space-y-3">
             {taxo.map((c) => {
@@ -1425,31 +1477,107 @@ function AdminPanel({ state, setState }) {
               return (
                 <div key={c.id} className="overflow-hidden rounded-lg border border-slate-200">
                   <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
-                    <span className="text-sm font-semibold">{c.label}</span>
+                    {editing && editing.type === "cat" && editing.catId === c.id ? (
+                      <div className="flex min-w-0 flex-1 items-center gap-1">
+                        <input
+                          autoFocus
+                          className={inputCls}
+                          value={editLabel}
+                          onChange={(e) => setEditLabel(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") confirmEdit();
+                            if (e.key === "Escape") cancelEdit();
+                          }}
+                        />
+                        <button title="Valider" onClick={confirmEdit}
+                          className="rounded-md px-2 py-1 text-xs text-emerald-600 hover:bg-emerald-50">✓</button>
+                        <button title="Annuler" onClick={cancelEdit}
+                          className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-200">✕</button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className={"text-sm font-semibold" + (c.active === false ? " text-slate-400 line-through" : "")}>{c.label}</span>
+                        {c.active === false && <Badge color="#94a3b8">désactivée</Badge>}
+                      </>
+                    )}
                     <Badge color={c.nature === "revenu" ? "#10b981" : "#64748b"}>
                       {c.nature === "revenu" ? "revenu" : "dépense"}
                     </Badge>
                     {env && <Badge color={env.color}>{env.label}</Badge>}
                     <span className="text-xs text-slate-400">{c.subs.length} sous-catégorie(s)</span>
+                    <div className="ml-auto flex gap-1">
+                      <button title="Renommer" onClick={() => startEdit("cat", c.id, null, c.label)}
+                        className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-200 hover:text-slate-600">✏️</button>
+                      <button
+                        title={c.active === false ? "Réactiver" : "Désactiver"}
+                        onClick={() => toggleActive(c.id, null, c.active !== false)}
+                        className={"rounded-md px-2 py-1 text-xs transition " + (
+                          c.active === false
+                            ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                            : "text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+                        )}
+                      >
+                        {c.active === false ? "▶️" : "⏸️"}
+                      </button>
+                    </div>
                   </div>
                   {c.subs.length > 0 && (
                     <div className="divide-y divide-slate-100">
                       {c.subs.map((s) => {
                         const used = useBySub.get(c.id + "|" + s.id) ?? 0;
                         return (
-                          <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-                            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                              <span className="text-sm">{s.label}</span>
-                              {subNature(c, s) === "revenu" && c.nature === "depense" && (
-                                <Badge color="#10b981">revenu</Badge>
-                              )}
-                              {used > 0 && (
-                                <span className="text-xs text-slate-400">
-                                  {used} dépense(s) récurrente(s)
-                                </span>
-                              )}
-                            </div>
+                          <div
+                            key={s.id}
+                            className={
+                              "flex flex-wrap items-center justify-between gap-2 px-3 py-2" +
+                              (s.active === false ? " opacity-60" : "")
+                            }
+                          >
+                            {editing && editing.type === "sub" && editing.catId === c.id && editing.subId === s.id ? (
+                              <div className="flex min-w-0 flex-1 items-center gap-1">
+                                <input
+                                  autoFocus
+                                  className={inputCls}
+                                  value={editLabel}
+                                  onChange={(e) => setEditLabel(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") confirmEdit();
+                                    if (e.key === "Escape") cancelEdit();
+                                  }}
+                                />
+                                <button title="Valider" onClick={confirmEdit}
+                                  className="rounded-md px-2 py-1 text-xs text-emerald-600 hover:bg-emerald-50">✓</button>
+                                <button title="Annuler" onClick={cancelEdit}
+                                  className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-200">✕</button>
+                              </div>
+                            ) : (
+                              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                <span className={"text-sm" + (s.active === false ? " text-slate-400 line-through" : "")}>{s.label}</span>
+                                {s.active === false && <Badge color="#94a3b8">désactivée</Badge>}
+                                {subNature(c, s) === "revenu" && c.nature === "depense" && (
+                                  <Badge color="#10b981">revenu</Badge>
+                                )}
+                                {used > 0 && (
+                                  <span className="text-xs text-slate-400">
+                                    {used} dépense(s) récurrente(s)
+                                  </span>
+                                )}
+                              </div>
+                            )}
                             <div className="flex gap-1">
+                              <button title="Renommer" onClick={() => startEdit("sub", c.id, s.id, s.label)}
+                                className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-200 hover:text-slate-600">✏️</button>
+                              <button
+                                title={s.active === false ? "Réactiver" : "Désactiver"}
+                                onClick={() => toggleActive(c.id, s.id, s.active !== false)}
+                                className={"rounded-md px-2 py-1 text-xs transition " + (
+                                  s.active === false
+                                    ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                                    : "text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+                                )}
+                              >
+                                {s.active === false ? "▶️" : "⏸️"}
+                              </button>
                               <button
                                 title="Marquer comme récurrente"
                                 onClick={() => toggleFlag(c.id, s, "recurring")}
@@ -1504,7 +1632,7 @@ function AdminPanel({ state, setState }) {
             {mode === "existante" ? (
               <Field label="Choisir la catégorie">
                 <select className={inputCls} value={catId} onChange={(e) => setCatId(e.target.value)}>
-                  {taxo.map((c) => (
+                  {taxo.filter((c) => c.active !== false).map((c) => (
                     <option key={c.id} value={c.id}>{c.label}</option>
                   ))}
                 </select>

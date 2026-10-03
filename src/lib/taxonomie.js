@@ -214,18 +214,21 @@ export function envelopeOf(catId, subId, taxo = TAXONOMIE) {
 
 /** Catégories éligibles pour une dépense (nature dépense, sous-catégories filtrées). */
 export function depenseCats(taxo = TAXONOMIE) {
-  return taxo.map((c) => ({
-    ...c,
-    subs: c.subs.filter((s) => subNature(c, s) === "depense"),
-  })).filter((c) => c.nature === "depense");
+  return taxo
+    .filter((c) => c.nature === "depense" && c.active !== false)
+    .map((c) => ({
+      ...c,
+      subs: c.subs.filter((s) => s.active !== false && subNature(c, s) === "depense"),
+    }));
 }
 
 /** Options « Catégorie — Sous-catégorie » éligibles pour un revenu. */
 export function revenuOptions(taxo = TAXONOMIE) {
   const out = [];
   for (const c of taxo) {
+    if (c.active === false) continue;
     for (const s of c.subs) {
-      if (subNature(c, s) === "revenu") {
+      if (s.active !== false && subNature(c, s) === "revenu") {
         out.push({ value: c.id + "|" + s.id, label: c.label + " — " + s.label });
       }
     }
@@ -259,7 +262,7 @@ export function normalizeLabel(s) {
 export function catByLabel(label, taxo = TAXONOMIE) {
   const n = normalizeLabel(label);
   if (!n) return undefined;
-  return taxo.find((c) => normalizeLabel(c.label) === n);
+  return taxo.find((c) => c.active !== false && normalizeLabel(c.label) === n);
 }
 
 /** Sous-catégorie d'une catégorie dont le libellé correspond. */
@@ -267,7 +270,7 @@ export function subByLabel(catId, subLabel, taxo = TAXONOMIE) {
   const c = taxCat(catId, taxo);
   const n = normalizeLabel(subLabel);
   if (!c || !n) return undefined;
-  return c.subs.find((s) => normalizeLabel(s.label) === n);
+  return c.subs.find((s) => s.active !== false && normalizeLabel(s.label) === n);
 }
 
 /**
@@ -283,7 +286,7 @@ export function subByOperation(catId, opLabel, taxo = TAXONOMIE) {
   if (!c || !n) return undefined;
   return c.subs.find((s) => {
     const sn = normalizeLabel(s.label);
-    return sn.length >= 4 && n.includes(sn);
+    return s.active !== false && sn.length >= 4 && n.includes(sn);
   });
 }
 
@@ -383,6 +386,67 @@ export function setSubFlags(taxo, catId, subId, { recurring, incompressible }) {
             s.id !== subId ? s : { ...s, recurring: !!recurring, incompressible: !!incompressible }
           ),
         }
+  );
+}
+
+
+/**
+ * Renomme une catégorie — fonction pure. Les écritures existantes pointent
+ * l'identifiant (inchangé), elles suivent donc le nouveau libellé.
+ * @throws {Error} catégorie inconnue, libellé vide ou déjà utilisé
+ */
+export function renameCategory(taxo, catId, label) {
+  const cat = taxo.find((c) => c.id === catId);
+  if (!cat) throw new Error("Catégorie inconnue : " + catId);
+  const l = String(label ?? "").trim();
+  if (!l) throw new Error("Libellé de catégorie requis");
+  const norm = normalizeLabel(l);
+  if (taxo.some((c) => c.id !== catId && normalizeLabel(c.label) === norm)) {
+    throw new Error("Catégorie déjà existante : " + l);
+  }
+  return taxo.map((c) => (c.id === catId ? { ...c, label: l } : c));
+}
+
+/**
+ * Renomme une sous-catégorie — fonction pure.
+ * @throws {Error} inconnue, libellé vide ou déjà utilisé dans la catégorie
+ */
+export function renameSubcategory(taxo, catId, subId, label) {
+  const cat = taxo.find((c) => c.id === catId);
+  const sub = cat?.subs.find((s) => s.id === subId);
+  if (!cat || !sub) throw new Error("Sous-catégorie inconnue : " + subId);
+  const l = String(label ?? "").trim();
+  if (!l) throw new Error("Libellé de sous-catégorie requis");
+  const norm = normalizeLabel(l);
+  if (cat.subs.some((s) => s.id !== subId && normalizeLabel(s.label) === norm)) {
+    throw new Error("Sous-catégorie déjà existante : " + l);
+  }
+  return taxo.map((c) =>
+    c.id !== catId
+      ? c
+      : { ...c, subs: c.subs.map((s) => (s.id !== subId ? s : { ...s, label: l })) }
+  );
+}
+
+/**
+ * Active/désactive une catégorie — fonction pure. Une catégorie désactivée
+ * (`active: false`) disparaît des formulaires et de la reconnaissance CSV,
+ * sans supprimer les écritures qui l'utilisent (elles restent affichées
+ * et comptées dans les totaux).
+ */
+export function setCategoryActive(taxo, catId, active) {
+  if (!taxo.some((c) => c.id === catId)) throw new Error("Catégorie inconnue : " + catId);
+  return taxo.map((c) => (c.id === catId ? { ...c, active: !!active } : c));
+}
+
+/** Active/désactive une sous-catégorie (même sémantique que la catégorie). */
+export function setSubActive(taxo, catId, subId, active) {
+  const cat = taxo.find((c) => c.id === catId);
+  if (!cat || !cat.subs.some((s) => s.id === subId)) throw new Error("Sous-catégorie inconnue : " + subId);
+  return taxo.map((c) =>
+    c.id !== catId
+      ? c
+      : { ...c, subs: c.subs.map((s) => (s.id !== subId ? s : { ...s, active: !!active })) }
   );
 }
 

@@ -30,6 +30,12 @@ import {
   addSubcategory,
   setSubFlags,
   subIncompressible,
+  renameCategory,
+  renameSubcategory,
+  setCategoryActive,
+  setSubActive,
+  catByLabel,
+  subByLabel,
 } from "./taxonomie.js";
 
 /* ------------------------------------------------------------------ */
@@ -691,3 +697,77 @@ describe("console d'administration — nomenclature dynamique", () => {
 function subNatureOf(cat, sub) {
   return sub.nature ?? cat.nature;
 }
+
+describe("console d'administration — renommage et désactivation", () => {
+  it("renameCategory renomme sans changer l'identifiant et refuse les doublons", () => {
+    const next = renameCategory(defaultTaxonomie(), "logement", "Habitation");
+    expect(taxCat("logement", next).label).toBe("Habitation");
+    expect(taxCat("logement", next).subs.length).toBe(6); // identifiant et sous-catégories inchangés
+    expect(() => renameCategory(next, "logement", "Loisirs")).toThrow();
+    expect(() => renameCategory(next, "logement", "  ")).toThrow();
+    expect(() => renameCategory(next, "inconnu", "X")).toThrow();
+  });
+
+  it("renameSubcategory refuse le doublon dans la catégorie, l'autorise ailleurs", () => {
+    const t = defaultTaxonomie();
+    expect(() => renameSubcategory(t, "logement", "loyers-charges", "Énergie (électricité, gaz, fuel, chauffage…)")).toThrow();
+    const next = renameSubcategory(t, "logement", "loyers-charges", "Loyer et charges");
+    expect(taxSub("logement", "loyers-charges", next).label).toBe("Loyer et charges");
+    // même libellé dans une autre catégorie : permis
+    const next2 = renameSubcategory(t, "sante", "pharmacie", "Loyers, Charges");
+    expect(taxSub("sante", "pharmacie", next2).label).toBe("Loyers, Charges");
+  });
+
+  it("setCategoryActive / setSubActive basculent l'état actif", () => {
+    const t = setCategoryActive(defaultTaxonomie(), "loisirs", false);
+    expect(taxCat("loisirs", t).active).toBe(false);
+    const t2 = setSubActive(t, "loisirs", "restaurants", false);
+    expect(taxSub("loisirs", "restaurants", t2).active).toBe(false);
+    expect(() => setCategoryActive(t2, "inconnu", true)).toThrow();
+    expect(() => setSubActive(t2, "loisirs", "inconnue", true)).toThrow();
+  });
+
+  it("depenseCats et revenuOptions excluent les éléments désactivés", () => {
+    let t = setCategoryActive(defaultTaxonomie(), "loisirs", false);
+    t = setSubActive(t, "logement", "travaux", false);
+    const cats = depenseCats(t);
+    expect(cats.some((c) => c.id === "loisirs")).toBe(false);
+    expect(cats.find((c) => c.id === "logement").subs.some((s) => s.id === "travaux")).toBe(false);
+    expect(revenuOptions(t).some((o) => o.value.startsWith("loisirs|"))).toBe(false);
+  });
+
+  it("la reconnaissance CSV ignore les catégories et sous-catégories désactivées", () => {
+    let t = setCategoryActive(defaultTaxonomie(), "loisirs", false);
+    expect(catByLabel("Loisirs", t)).toBeUndefined();
+    expect(catByLabel("Loisirs")).toBeTruthy(); // nomenclature par défaut intacte
+    t = setSubActive(t, "logement", "energie", false);
+    expect(subByLabel("logement", "Energie (électricité, gaz, fuel, chauffage…)", t)).toBeUndefined();
+    expect(subByLabel("logement", "Travaux, réparation, entretien, aménagement…", t)).toBeTruthy();
+  });
+
+  it("l'affichage des écritures existantes survit à la désactivation", () => {
+    const t = setSubActive(defaultTaxonomie(), "logement", "loyers-charges", false);
+    expect(labelOf("logement", "loyers-charges", t)).toBe("Logement · Loyers, Charges");
+    expect(envelopeOf("logement", "loyers-charges", t)).toBe("domestiques");
+  });
+
+  it("migrateState normalise le drapeau actif (absent → actif)", () => {
+    const st = migrateState({ soldeDepart: 0 });
+    expect(st.taxonomie.every((c) => c.active === true)).toBe(true);
+    expect(st.taxonomie.every((c) => c.subs.every((s) => s.active === true))).toBe(true);
+    const st2 = migrateState({ taxonomie: setCategoryActive(st.taxonomie, "loisirs", false) });
+    expect(taxCat("loisirs", st2.taxonomie).active).toBe(false);
+  });
+
+  it("une dépense d'une sous-catégorie désactivée reste comptée dans les totaux", () => {
+    const st = migrateState({
+      soldeDepart: 0,
+      expenses: [
+        { id: "e1", label: "Sorties", amount: 80, day: 10, cat: "loisirs", sub: "restaurants", freq: "mensuelle" },
+      ],
+    });
+    const before = monthlyExpenses(st, 2026, 0).total;
+    st.taxonomie = setCategoryActive(st.taxonomie, "loisirs", false);
+    expect(monthlyExpenses(st, 2026, 0).total).toBe(before);
+  });
+});

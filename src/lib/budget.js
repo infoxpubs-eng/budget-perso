@@ -117,15 +117,17 @@ function normalizeTaxonomie(taxo) {
     Array.isArray(taxo) &&
     taxo.length > 0 &&
     taxo.every((c) => c && c.id && typeof c.label === "string" && Array.isArray(c.subs));
-  if (!valid) return defaultTaxonomie();
+  if (!valid) taxo = defaultTaxonomie();
   return taxo.map((c) => ({
     nature: "depense",
     env: "sports",
     ...c,
+    active: c.active !== false,
     subs: (c.subs ?? []).map((sub) => ({
       ...sub,
       recurring: !!sub.recurring,
       incompressible: !!sub.incompressible,
+      active: sub.active !== false,
     })),
   }));
 }
