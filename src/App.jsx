@@ -49,7 +49,7 @@ import {
   setCategoryActive,
   setSubActive,
 } from "./lib/taxonomie.js";
-import { parseCsv, rowsToEntries, applyTaxoAdditions, A_CLASSER } from "./lib/import-csv.js";
+import { parseCsv, rowsToEntries, applyTaxoAdditions, mergeHistory, A_CLASSER } from "./lib/import-csv.js";
 
 /* ============================== Données initiales ============================== */
 
@@ -419,11 +419,21 @@ export default function App() {
         const m = mapping.find((mm) => mm.from === A_CLASSER + "|" + x.sub);
         return m ? { ...x, cat: m.cat, sub: m.sub, label: m.label } : x;
       };
+      // Historique réel : les occurrences couvertes par une écriture déjà
+      // planifiée (dates et montants observés du relevé) lui sont rattachées.
+      const withHistory = (entry, kind) => {
+        const c = r.coveredHistory.find((cv) => cv.id === entry.id && cv.kind === kind);
+        return c ? { ...entry, history: mergeHistory(entry.history, c.obs) } : entry;
+      };
       return {
         ...s,
         taxonomie: taxo,
-        expenses: [...s.expenses, ...r.newExpenses.map(remap)],
-        incomes: [...s.incomes, ...r.newIncomes.map(remap), ...r.incomes.map(remap)],
+        expenses: [...s.expenses.map((e) => withHistory(e, "depense")), ...r.newExpenses.map(remap)],
+        incomes: [
+          ...s.incomes.map((i) => withHistory(i, "revenu")),
+          ...r.newIncomes.map(remap),
+          ...r.incomes.map(remap),
+        ],
         extras: [...s.extras, ...r.extras.map(remap)],
       };
     });
@@ -1194,6 +1204,13 @@ export default function App() {
                     importées en double)
                   </div>
                 )}
+                {(csvImport.r.newExpenses.length > 0 || csvImport.r.recurrentes.length > 0) && (
+                  <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+                    Les dates réelles et les montants observés des couples 🔁 sont conservés sur leurs
+                    écritures (historique pour le futur suivi réel vs prévisionnel) ; un même relevé
+                    réimporté n'ajoute aucun doublon.
+                  </div>
+                )}
 
                 {csvImport.r.taxoAdditions.length > 0 && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
@@ -1818,7 +1835,7 @@ function AdminPanel({ state, setState }) {
                         className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-200 hover:text-slate-600">✏️</button>
                       <button
                         title={c.active === false ? "Réactiver" : "Désactiver"}
-                        onClick={() => toggleActive(c.id, null, c.active !== false)}
+                        onClick={() => toggleActive(c.id, null, c.active === false)}
                         className={"rounded-md px-2 py-1 text-xs transition " + (
                           c.active === false
                             ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
@@ -1877,7 +1894,7 @@ function AdminPanel({ state, setState }) {
                                 className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-200 hover:text-slate-600">✏️</button>
                               <button
                                 title={s.active === false ? "Réactiver" : "Désactiver"}
-                                onClick={() => toggleActive(c.id, s.id, s.active !== false)}
+                                onClick={() => toggleActive(c.id, s.id, s.active === false)}
                                 className={"rounded-md px-2 py-1 text-xs transition " + (
                                   s.active === false
                                     ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"

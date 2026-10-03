@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCsv, parseFrDate, parseFrAmount, rowsToEntries, matchesPlannedExpense, matchesPlannedIncome, applyTaxoAdditions, A_CLASSER } from "./import-csv.js";
+import { parseCsv, parseFrDate, parseFrAmount, rowsToEntries, matchesPlannedExpense, matchesPlannedIncome, applyTaxoAdditions, mergeHistory, A_CLASSER } from "./import-csv.js";
 import { TAXONOMIE, catByLabel, subByLabel, subByOperation, normalizeLabel } from "./taxonomie.js";
 
 /* Extrait réel d'un relevé bancaire (CRLF, séparateur « ; », colonne vide finale). */
@@ -550,4 +550,98 @@ describe("applyTaxoAdditions (v0.17.0)", () => {
   function migrateBase() {
     return { soldeDepart: 1500, expenses: [], incomes: [], extras: [] };
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* Historique réel des occurrences 🔁 (v0.19.0)                        */
+/* ------------------------------------------------------------------ */
+
+describe("historique réel des occurrences 🔁", () => {
+  const row = (over = {}) => ({
+    day: 3, m: 8, y: 2026, amount: -850,
+    cat: "logement", sub: "loyers-charges", label: "Loyers, Charges",
+    ...over,
+  });
+
+  it("chaque écriture récurrente créée porte l'historique de ses occurrences", () => {
+    const lignes = [
+      row({ day: 3 }),
+      row({ day: 5, m: 7 }),
+      row({ day: 5 }),
+    ];
+    const r = rowsToEntries(lignes);
+    expect(r.newExpenses).toHaveLength(1); // un seul couple et montant
+    // les trois dates réelles sont conservées
+    expect(r.newExpenses[0].history).toHaveLength(3);
+    expect(r.newExpenses[0].history).toContainEqual({ day: 5, m: 7, y: 2026, amount: 850 });
+    expect(r.newExpenses[0].history.every((o) => o.amount > 0)).toBe(true);
+  });
+
+  it("un revenu récurrent créé porte aussi son historique", () => {
+    const salaire = row({
+      amount: 2500, cat: "revenus-travail", sub: "salaire-fixe",
+      label: "Salaire fixe", day: 28,
+    });
+    const r = rowsToEntries([salaire, { ...salaire, day: 27, m: 7 }]);
+    expect(r.newIncomes).toHaveLength(1);
+    expect(r.newIncomes[0].history).toHaveLength(2);
+    expect(r.newIncomes[0].history).toContainEqual({ day: 27, m: 7, y: 2026, amount: 2500 });
+  });
+
+  it("une ligne couverte par une écriture planifiée alimente son historique (coveredHistory)", () => {
+    const loyer = {
+      id: "e1", label: "Loyer", amount: 850, day: 3,
+      cat: "logement", sub: "loyers-charges", freq: "mensuelle",
+    };
+    const r = rowsToEntries([row(), row({ day: 5, m: 7 })], { expenses: [loyer] });
+    expect(r.newExpenses).toHaveLength(0);
+    expect(r.coveredHistory).toEqual([
+      {
+        id: "e1",
+        kind: "depense",
+        obs: [
+          { day: 3, m: 8, y: 2026, amount: 850 },
+          { day: 5, m: 7, y: 2026, amount: 850 },
+        ],
+      },
+    ]);
+  });
+
+  it("une ligne non 🔁 consommant une écriture planifiée alimente aussi son historique", () => {
+    const resto = {
+      id: "r1", label: "Resto", amount: 40, day: 2,
+      cat: "loisirs", sub: "restaurants", freq: "mensuelle",
+    };
+    const ligne = row({ amount: -40, cat: "loisirs", sub: "restaurants", label: "Restaurants, bars…" });
+    const r = rowsToEntries([ligne], { expenses: [resto] });
+    expect(r.recurrentes).toHaveLength(1);
+    expect(r.coveredHistory).toEqual([
+      { id: "r1", kind: "depense", obs: [{ day: 3, m: 8, y: 2026, amount: 40 }] },
+    ]);
+  });
+
+  it("un revenu couvert par un revenu planifié alimente son historique (kind revenu)", () => {
+    const aide = { id: "i1", label: "Aide / allocations", amount: 180, day: 5, mode: "fixe" };
+    const r = rowsToEntries([row({ amount: 180 })], { incomes: [aide] });
+    expect(r.coveredHistory).toEqual([
+      { id: "i1", kind: "revenu", obs: [{ day: 3, m: 8, y: 2026, amount: 180 }] },
+    ]);
+  });
+
+  it("mergeHistory déduplique par date et montant, trie par date, fusionne l'existant", () => {
+    const existing = [
+      { day: 5, m: 7, y: 2026, amount: 850 },
+      { day: 5, m: 8, y: 2026, amount: 850 },
+    ];
+    const obs = [
+      { day: 5, m: 8, y: 2026, amount: 850 }, // doublon exact (relevé réimporté)
+      { day: 3, m: 9, y: 2026, amount: 850 },
+      { day: 5, m: 8, y: 2026, amount: 870 }, // même date, montant différent : conservé
+    ];
+    const merged = mergeHistory(existing, obs);
+    expect(merged.map((o) => o.m)).toEqual([7, 8, 8, 9]);
+    expect(merged.filter((o) => o.m === 8)).toHaveLength(2); // 850 et 870
+    // un même relevé réimporté n'ajoute rien
+    expect(mergeHistory(merged, obs)).toHaveLength(merged.length);
+  });
 });

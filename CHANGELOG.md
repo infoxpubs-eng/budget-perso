@@ -12,6 +12,18 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.19.0] — 2026-10-03
+
+### Ajouté
+
+- **Historique réel des occurrences 🔁** : à l'import CSV, chaque ligne rapprochée d'un couple marqué récurrent est mémorisée avec sa **date réelle et son montant observé**. Les écritures récurrentes créées portent un champ `history` ; les lignes couvertes par une écriture déjà planifiée alimentent `coveredHistory`, fusionné dans l'écriture existante au moment de la confirmation. Aucun nouvel affichage : l'historique est stocké (persistance automatique via la migration d'état) en vue du futur suivi « réel vs prévisionnel ».
+- Nouvelle fonction `mergeHistory(existing, obs)` dans `import-csv.js` : fusionne les historiques en dédoublonnant par date et montant — réimporter un même relevé n'ajoute aucune occurrence — et trie par date.
+- Le dialogue d'import mentionne la capture de l'historique (dates réelles, montants observés, aucun doublon au réimport).
+
+### Corrigé
+
+- Console 🛠️ Admin : les boutons « Désactiver / Réactiver » des catégories et sous-catégories étaient inversés — un clic sur « Désactiver » ne changeait rien. L'état visé est désormais calculé à partir de l'état courant (`active === false` → on réactive, sinon on désactive).
+
 ## [0.18.0] — 2026-10-03
 
 ### Ajouté

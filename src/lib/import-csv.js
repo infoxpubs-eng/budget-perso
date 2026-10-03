@@ -185,6 +185,26 @@ export const A_CLASSER = "a-classer";
 export const A_CLASSER_LABEL = "À classer";
 
 /**
+ * Fusionne les observations réelles d'une écriture récurrente (historique
+ * du relevé : dates et montants observés). Dédupliquées par date et montant
+ * (un même relevé réimporté n'ajoute rien), triées par date croissante.
+ *
+ * @param {Array<{day:number,m:number,y:number,amount:number}>} existing
+ * @param {Array<{day:number,m:number,y:number,amount:number}>} obs
+ */
+export function mergeHistory(existing = [], obs = []) {
+  const seen = new Set();
+  const out = [];
+  for (const o of [...(existing ?? []), ...(obs ?? [])]) {
+    const key = o.y + "-" + o.m + "-" + o.day + "|" + Math.round(o.amount * 100);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ day: o.day, m: o.m, y: o.y, amount: o.amount });
+  }
+  return out.sort((a, b) => (a.y - b.y) || (a.m - b.m) || (a.day - b.day));
+}
+
+/**
  * Valeur la plus fréquente d'un tableau (la première insérée l'emporte en
  * cas d'égalité) — jour type d'un prélèvement récurrent, par exemple.
  */
@@ -235,6 +255,8 @@ const subIsRecurring = subRecurring;
  *             recurrentes: Array<{label:string,amount:number,kind:"depense"|"revenu"}>,
  *             newExpenses: Array, newIncomes: Array,
  *             taxoAdditions: Array<{label:string,nature:"depense"|"revenu"}>,
+ *             coveredHistory: Array<{id:string,kind:"depense"|"revenu",
+ *                                     obs:Array<{day:number,m:number,y:number,amount:number}>}>,
  *             couvertesOut: number, couvertesIn: number,
  *             depensesTotal: number, revenusTotal: number }}
  */
@@ -268,6 +290,20 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
     return { ...r, cat: A_CLASSER, sub: slugify(label), label };
   });
 
+  // Occurrences réelles des écritures déjà planifiées (historique réel du
+  // relevé : dates et montants observés), indexées par écriture couverte.
+  const covered = new Map();
+  const recordObs = (x, kind, r) => {
+    const k = kind + "|" + x.id;
+    if (!covered.has(k)) covered.set(k, { id: x.id, kind, obs: [] });
+    covered.get(k).obs.push({
+      day: r.day,
+      m: r.m,
+      y: r.y,
+      amount: kind === "depense" ? -r.amount : r.amount,
+    });
+  };
+
   // Prélèvements récurrents 🔁 : groupés par couple et montant (en centimes).
   const groupsOut = new Map();
   const groupsIn = new Map();
@@ -277,6 +313,7 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
       if (subIsRecurring(r.cat, r.sub, taxo)) {
         const x = expenses.find((x) => matchesPlannedExpense(r, x));
         if (x) {
+          recordObs(x, "depense", r);
           recurrentes.push({ label: x.label, amount: -r.amount, kind: "depense" });
           continue;
         }
@@ -290,6 +327,7 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
       );
       if (e) {
         usedExpenses.add(e.id);
+        recordObs(e, "depense", r);
         recurrentes.push({ label: e.label, amount: -r.amount, kind: "depense" });
         continue;
       }
@@ -308,6 +346,7 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
       if (subIsRecurring(r.cat, r.sub, taxo)) {
         const x = incomesPlanned.find((x) => matchesPlannedIncome(r, x));
         if (x) {
+          recordObs(x, "revenu", r);
           recurrentes.push({ label: x.label, amount: r.amount, kind: "revenu" });
           continue;
         }
@@ -321,6 +360,7 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
       );
       if (i) {
         usedIncomes.add(i.id);
+        recordObs(i, "revenu", r);
         recurrentes.push({ label: i.label, amount: r.amount, kind: "revenu" });
         continue;
       }
@@ -362,6 +402,7 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
       sub,
       freq: "mensuelle",
       incompressible: subIncompressible(cat, sub, taxo),
+      history: rs.map((x) => ({ day: x.day, m: x.m, y: x.y, amount: -x.amount })),
     });
     couvertesOut += rs.length;
   }
@@ -386,6 +427,7 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
       day: modeOf(rs.map((x) => x.day)),
       cat,
       sub,
+      history: rs.map((x) => ({ day: x.day, m: x.m, y: x.y, amount: x.amount })),
     });
     couvertesIn += rs.length;
   }
@@ -399,6 +441,7 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
     taxoAdditions,
     couvertesOut,
     couvertesIn,
+    coveredHistory: [...covered.values()],
     depensesTotal,
     revenusTotal,
   };
