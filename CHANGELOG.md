@@ -12,6 +12,17 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.20.0] — 2026-10-03
+
+### Corrigé
+
+- **Un couple 🔁 dont le montant évolue ne crée plus une écriture par montant** (salaire qui change, facture qui varie) : chaque montant donnait une écriture récurrente, toutes comptées chaque mois — trois salaires simulés au lieu d'un. Les lignes 🔁 d'un couple sont désormais découpées en **séries temporelles** : un montant qui varie d'un mois à l'autre reste dans la même série (une seule écriture, au **dernier montant observé**, toutes les occurrences conservées dans son historique) ; deux prélèvements distincts d'un même couple co-occurrent le même mois et forment deux séries (deux écritures).
+
+### Ajouté
+
+- **Rattachement au montant nouveau** : une ligne 🔁 dont le montant ne correspond à aucune écriture planifiée est rattachée à l'écriture unique de son couple (si elle n'a pas déjà été payée ce mois-là) au lieu d'en créer une nouvelle. L'occurrence alimente son historique et son montant prévisionnel suit la dernière occurrence observée (`syncAmount` sur `coveredHistory`) : un salaire réel met à jour l'écriture « Salaire » existante. En cas d'ambiguïté (plusieurs écritures sur le couple), la ligne reste une écriture séparée.
+- Le dialogue d'import mentionne la synchronisation du montant prévisionnel des écritures 🔁 rattachées.
+
 ## [0.19.0] — 2026-10-03
 
 ### Ajouté

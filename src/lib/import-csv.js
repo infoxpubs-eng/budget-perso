@@ -223,6 +223,29 @@ function modeOf(values) {
   return best;
 }
 
+/**
+ * Découpe les lignes 🔁 d'un couple en « séries » temporelles. Une ligne
+ * rejoint la première série qui n'a pas d'autre occurrence ce mois-ci — ou
+ * seulement des occurrences du même montant (le même prélèvement peut être
+ * prélevé deux fois dans le mois). Un montant qui varie d'un mois à l'autre
+ * reste donc dans la même série : c'est le même prélèvement (ou le même
+ * salaire) dont le montant évolue, pas un abonnement supplémentaire.
+ * Deux prélèvements distincts d'un même couple co-occurrent le même mois
+ * et forment deux séries.
+ */
+function buildSeries(rs) {
+  const series = [];
+  for (const r of rs) {
+    const cents = Math.round(Math.abs(r.amount) * 100);
+    const target = series.find((ser) =>
+      ser.every((x) => x.y !== r.y || x.m !== r.m || Math.round(Math.abs(x.amount) * 100) === cents)
+    );
+    if (target) target.push(r);
+    else series.push([r]);
+  }
+  return series;
+}
+
 /** Le couple (catégorie, sous-catégorie) est-il marqué récurrent 🔁 dans la nomenclature ? */
 const subIsRecurring = subRecurring;
 
@@ -231,12 +254,20 @@ const subIsRecurring = subRecurring;
  * qui pilote l'import : les paramètres du couple catégorie / sous-catégorie
  * déterminent comment chaque ligne est intégrée.
  *
- * - Couple marqué 🔁 (récurrent) → une écriture récurrente planifiée, une
- *   seule par couple et montant (jour type = jour le plus fréquent des
- *   occurrences ; incompressible 🔒 repris de la nomenclature). Les lignes
- *   du relevé ainsi couvertes ne sont PAS importées en double. Une ligne
- *   🔁 déjà couverte par une écriture planifiée (catégorie, sous-catégorie,
- *   montant à 0,01 € près) est comptée dans `recurrentes`.
+ * - Couple marqué 🔁 (récurrent) → une écriture récurrente planifiée par
+ *   « série » temporelle du couple (jour type = jour le plus fréquent des
+ *   occurrences ; incompressible 🔒 repris de la nomenclature). Un montant
+ *   qui varie d'un mois à l'autre reste dans la même série — c'est le même
+ *   prélèvement (ou le même salaire) dont le montant évolue ; deux
+ *   prélèvements distincts d'un même couple co-occurrent le même mois et
+ *   forment deux séries. L'écriture créée porte le DERNIER montant observé
+ *   comme prévision, toutes les occurrences étant conservées dans son
+ *   historique. Une ligne 🔁 déjà couverte par une écriture planifiée
+ *   (catégorie, sous-catégorie, montant à 0,01 € près) est comptée dans
+ *   `recurrentes`. Une ligne 🔁 au montant inconnu dont le couple n'a
+ *   qu'une seule écriture planifiée (non rapprochée ce mois-ci) lui est
+ *   rattachée : l'occurrence alimente son historique et son montant
+ *   prévisionnel suivra la dernière occurrence observée (`syncAmount`).
  * - Sinon, débit → dépense exceptionnelle ; crédit → revenu unique.
  * - Une ligne non 🔁 correspondant à une écriture déjà planifiée (même
  *   catégorie/sous-catégorie, même montant à 0,01 € près, mois compatible
@@ -256,7 +287,8 @@ const subIsRecurring = subRecurring;
  *             newExpenses: Array, newIncomes: Array,
  *             taxoAdditions: Array<{label:string,nature:"depense"|"revenu"}>,
  *             coveredHistory: Array<{id:string,kind:"depense"|"revenu",
- *                                     obs:Array<{day:number,m:number,y:number,amount:number}>}>,
+ *                                     obs:Array<{day:number,m:number,y:number,amount:number}>,
+ *                                     syncAmount?:boolean}>,
  *             couvertesOut: number, couvertesIn: number,
  *             depensesTotal: number, revenusTotal: number }}
  */
@@ -292,10 +324,12 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
 
   // Occurrences réelles des écritures déjà planifiées (historique réel du
   // relevé : dates et montants observés), indexées par écriture couverte.
+  // `syncAmount` signale un rattachement au montant nouveau : l'écriture
+  // suivra la dernière occurrence observée (montant prévisionnel synchronisé).
   const covered = new Map();
-  const recordObs = (x, kind, r) => {
+  const recordObs = (x, kind, r, sync = false) => {
     const k = kind + "|" + x.id;
-    if (!covered.has(k)) covered.set(k, { id: x.id, kind, obs: [] });
+    if (!covered.has(k)) covered.set(k, { id: x.id, kind, obs: [], ...(sync ? { syncAmount: true } : {}) });
     covered.get(k).obs.push({
       day: r.day,
       m: r.m,
@@ -304,9 +338,17 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
     });
   };
 
-  // Prélèvements récurrents 🔁 : groupés par couple et montant (en centimes).
-  const groupsOut = new Map();
-  const groupsIn = new Map();
+  // Mois rapprochés par écriture planifiée (garde-fou du rattachement : on ne
+  // rattache pas une série à une écriture qui a déjà été payée ce mois-là).
+  const matchedMonths = new Map();
+  const rememberMatch = (x, r) => {
+    if (!matchedMonths.has(x.id)) matchedMonths.set(x.id, new Set());
+    matchedMonths.get(x.id).add(r.y + "-" + r.m);
+  };
+
+  // Lignes 🔁 non couvertes, regroupées par couple (découpées en séries ensuite).
+  const recurringOut = new Map();
+  const recurringIn = new Map();
 
   for (const r of resolved) {
     if (r.amount < 0) {
@@ -314,12 +356,13 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
         const x = expenses.find((x) => matchesPlannedExpense(r, x));
         if (x) {
           recordObs(x, "depense", r);
+          rememberMatch(x, r);
           recurrentes.push({ label: x.label, amount: -r.amount, kind: "depense" });
           continue;
         }
-        const key = r.cat + "|" + r.sub + "|" + Math.round(-r.amount * 100);
-        if (!groupsOut.has(key)) groupsOut.set(key, []);
-        groupsOut.get(key).push(r);
+        const ck = r.cat + "|" + r.sub;
+        if (!recurringOut.has(ck)) recurringOut.set(ck, []);
+        recurringOut.get(ck).push(r);
         continue;
       }
       const e = expenses.find(
@@ -347,12 +390,13 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
         const x = incomesPlanned.find((x) => matchesPlannedIncome(r, x));
         if (x) {
           recordObs(x, "revenu", r);
+          rememberMatch(x, r);
           recurrentes.push({ label: x.label, amount: r.amount, kind: "revenu" });
           continue;
         }
-        const key = r.cat + "|" + r.sub + "|" + Math.round(r.amount * 100);
-        if (!groupsIn.has(key)) groupsIn.set(key, []);
-        groupsIn.get(key).push(r);
+        const ck = r.cat + "|" + r.sub;
+        if (!recurringIn.has(ck)) recurringIn.set(ck, []);
+        recurringIn.get(ck).push(r);
         continue;
       }
       const i = incomesPlanned.find(
@@ -379,58 +423,86 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
     }
   }
 
-  // Une écriture récurrente par groupe (couple + montant). Plusieurs montants
-  // pour un même couple → une écriture chacun, avec le montant en suffixe.
-  const couplesOut = new Map();
-  for (const key of groupsOut.keys()) {
-    const ck = key.split("|").slice(0, 2).join("|");
-    couplesOut.set(ck, (couplesOut.get(ck) ?? 0) + 1);
-  }
-  for (const [key, rs] of groupsOut) {
-    const [cat, sub, cents] = key.split("|");
-    const amount = Number(cents) / 100;
-    const label =
-      (couplesOut.get(cat + "|" + sub) ?? 0) > 1
-        ? rs[0].label + " · " + amount.toFixed(2).replace(".", ",") + " €"
-        : rs[0].label;
-    newExpenses.push({
-      id: newId(),
-      label,
-      amount,
-      day: modeOf(rs.map((x) => x.day)),
-      cat,
-      sub,
-      freq: "mensuelle",
-      incompressible: subIncompressible(cat, sub, taxo),
-      history: rs.map((x) => ({ day: x.day, m: x.m, y: x.y, amount: -x.amount })),
-    });
-    couvertesOut += rs.length;
-  }
+  /**
+   * Rattache ou crée les écritures récurrentes des séries d'un couple.
+   * Rattachement (aucune écriture en double) : le couple a une seule
+   * écriture planifiée, non rapprochée ce mois-ci — la série lui est
+   * rattachée, occurrences dans son historique et montant prévisionnel
+   * synchronisé sur la dernière occurrence. Sinon, chaque série devient
+   * une écriture récurrente planifiée au dernier montant observé.
+   */
+  const applySeries = (kind, recurring, planned, isCandidate, pushNew, countCouvertes) => {
+    for (const [ck, rs] of recurring) {
+      const [cat, sub] = ck.split("|");
+      const seriesList = buildSeries(rs);
+      for (const ser of seriesList) {
+        const sorted = [...ser].sort((a, b) => (a.y - b.y) || (a.m - b.m) || (a.day - b.day));
+        const last = sorted[sorted.length - 1];
+        const months = new Set(ser.map((r) => r.y + "-" + r.m));
+        const candidates = planned.filter((x) => isCandidate(x, cat, sub));
+        const target =
+          candidates.length === 1 &&
+          ![...(matchedMonths.get(candidates[0].id) ?? [])].some((mm) => months.has(mm))
+            ? candidates[0]
+            : null;
+        if (target) {
+          for (const r of ser) {
+            recordObs(target, kind, r, true);
+            recurrentes.push({ label: target.label, amount: kind === "depense" ? -r.amount : r.amount, kind });
+          }
+          continue;
+        }
+        const amount = kind === "depense" ? -last.amount : last.amount;
+        const label =
+          seriesList.length > 1
+            ? ser[0].label + " · " + amount.toFixed(2).replace(".", ",") + " €"
+            : ser[0].label;
+        pushNew({
+          id: newId(),
+          label,
+          amount,
+          day: modeOf(ser.map((x) => x.day)),
+          cat,
+          sub,
+          history: sorted.map((x) => ({
+            day: x.day,
+            m: x.m,
+            y: x.y,
+            amount: kind === "depense" ? -x.amount : x.amount,
+          })),
+        });
+        countCouvertes(ser.length);
+      }
+    }
+  };
 
-  const couplesIn = new Map();
-  for (const key of groupsIn.keys()) {
-    const ck = key.split("|").slice(0, 2).join("|");
-    couplesIn.set(ck, (couplesIn.get(ck) ?? 0) + 1);
-  }
-  for (const [key, rs] of groupsIn) {
-    const [cat, sub, cents] = key.split("|");
-    const amount = Number(cents) / 100;
-    const label =
-      (couplesIn.get(cat + "|" + sub) ?? 0) > 1
-        ? rs[0].label + " · " + amount.toFixed(2).replace(".", ",") + " €"
-        : rs[0].label;
-    newIncomes.push({
-      id: newId(),
-      label,
-      amount,
-      mode: "fixe",
-      day: modeOf(rs.map((x) => x.day)),
-      cat,
-      sub,
-      history: rs.map((x) => ({ day: x.day, m: x.m, y: x.y, amount: x.amount })),
-    });
-    couvertesIn += rs.length;
-  }
+  applySeries(
+    "depense",
+    recurringOut,
+    expenses,
+    (x, cat, sub) => x.cat === cat && x.sub === sub,
+    (e) => {
+      e.freq = "mensuelle";
+      e.incompressible = subIncompressible(e.cat, e.sub, taxo);
+      newExpenses.push(e);
+    },
+    (n) => { couvertesOut += n; }
+  );
+
+  applySeries(
+    "revenu",
+    recurringIn,
+    incomesPlanned,
+    (x, cat, sub) =>
+      x.mode !== "unique" &&
+      ((x.cat === cat && (x.sub === sub || x.sub === undefined)) ||
+        (sub === "salaire-fixe" && x.mode === "salaire" && x.cat === undefined)),
+    (i) => {
+      i.mode = "fixe";
+      newIncomes.push(i);
+    },
+    (n) => { couvertesIn += n; }
+  );
 
   return {
     extras,

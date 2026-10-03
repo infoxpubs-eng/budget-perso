@@ -185,18 +185,27 @@ describe("rowsToEntries — écritures déjà planifiées", () => {
     expect(depensesTotal).toBe(0);
   });
 
-  it("importe une dépense 🔁 dont le montant diffère comme écriture récurrente", () => {
+  it("rattache une ligne 🔁 au montant inconnu à l'écriture du couple (historique + synchronisation)", () => {
     const elec = { ...loyer, id: "e2", sub: "energie", amount: 95 };
-    const { extras, recurrentes, newExpenses, couvertesOut } = rowsToEntries(
+    const { extras, recurrentes, newExpenses, couvertesOut, coveredHistory } = rowsToEntries(
       [row({ amount: -101.34, sub: "energie" })],
       { expenses: [elec] }
     );
-    expect(recurrentes).toHaveLength(0);
+    // Pas de nouvelle écriture : la ligne est rattachée à l'écriture
+    // existante du couple ; son montant prévisionnel suivra la dernière
+    // occurrence observée (flag syncAmount).
+    expect(recurrentes).toEqual([{ label: "Loyer", amount: 101.34, kind: "depense" }]);
     expect(extras).toHaveLength(0);
-    expect(newExpenses).toHaveLength(1);
-    expect(newExpenses[0].amount).toBeCloseTo(101.34);
-    expect(newExpenses[0].incompressible).toBe(true); // 🔒 repris de la nomenclature
-    expect(couvertesOut).toBe(1);
+    expect(newExpenses).toHaveLength(0);
+    expect(couvertesOut).toBe(0);
+    expect(coveredHistory).toEqual([
+      {
+        id: "e2",
+        kind: "depense",
+        obs: [{ day: 3, m: 8, y: 2026, amount: 101.34 }],
+        syncAmount: true,
+      },
+    ]);
   });
 
   it("respecte le mois prévu d'une dépense annuelle", () => {
@@ -550,6 +559,118 @@ describe("applyTaxoAdditions (v0.17.0)", () => {
   function migrateBase() {
     return { soldeDepart: 1500, expenses: [], incomes: [], extras: [] };
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* Séries temporelles 🔁 (v0.20.0) : un montant qui varie ne crée       */
+/* pas d'écriture en double                                            */
+/* ------------------------------------------------------------------ */
+
+describe("séries temporelles des couples 🔁 (v0.20.0)", () => {
+  const row = (over = {}) => ({
+    day: 3, m: 8, y: 2026, amount: -850,
+    cat: "logement", sub: "loyers-charges", label: "Loyers, Charges",
+    ...over,
+  });
+  const salaire = (over = {}) => ({
+    day: 28, m: 7, y: 2026, amount: 3622.44,
+    cat: "revenus-travail", sub: "salaire-fixe", label: "Salaire fixe",
+    ...over,
+  });
+
+  it("un salaire 🔁 dont le montant évolue : une seule écriture, au dernier montant observé", () => {
+    const r = rowsToEntries([
+      salaire(),
+      salaire({ day: 27, m: 8, amount: 3450.41 }),
+      salaire({ day: 26, m: 9, amount: 5204.96 }),
+    ]);
+    expect(r.newIncomes).toHaveLength(1); // pas trois écritures comptées chaque mois
+    expect(r.newIncomes[0].amount).toBeCloseTo(5204.96); // le dernier montant observé
+    expect(r.newIncomes[0].day).toBe(28); // jour le plus fréquent (premier inséré en cas d'égalité)
+    expect(r.newIncomes[0].history).toHaveLength(3); // les trois occurrences conservées
+    expect(r.newIncomes[0].history[2]).toEqual({ day: 26, m: 9, y: 2026, amount: 5204.96 });
+    expect(r.couvertesIn).toBe(3);
+    expect(r.incomes).toHaveLength(0);
+  });
+
+  it("un prélèvement 🔁 dont le montant varie : une seule écriture, au dernier montant observé", () => {
+    const r = rowsToEntries([
+      row({ amount: -850, m: 7 }),
+      row({ amount: -870, m: 8 }),
+    ]);
+    expect(r.newExpenses).toHaveLength(1);
+    expect(r.newExpenses[0].amount).toBe(870);
+    expect(r.newExpenses[0].history).toHaveLength(2);
+    expect(r.newExpenses[0].incompressible).toBe(true); // 🔒 repris de la nomenclature
+  });
+
+  it("deux prélèvements distincts d'un même couple co-occurrent le même mois : deux séries", () => {
+    const r = rowsToEntries([
+      row({ amount: -13 }),
+      row({ amount: -13 }),
+      row({ amount: -15 }),
+    ]);
+    expect(r.newExpenses).toHaveLength(2);
+    expect(r.couvertesOut).toBe(3);
+    const labels = r.newExpenses.map((e) => e.label).sort();
+    expect(labels).toEqual([
+      "Loyers, Charges · 13,00 €",
+      "Loyers, Charges · 15,00 €",
+    ]);
+  });
+
+  it("un salaire réel met à jour l'écriture « salaire » existante (rattachement, mode salaire)", () => {
+    const existant = { id: "i9", label: "Salaire", amount: 2500, mode: "salaire" };
+    const r = rowsToEntries([salaire({ amount: 5204.96 })], { incomes: [existant] });
+    expect(r.newIncomes).toHaveLength(0); // pas de salaire en double
+    expect(r.recurrentes).toEqual([{ label: "Salaire", amount: 5204.96, kind: "revenu" }]);
+    expect(r.coveredHistory).toEqual([
+      {
+        id: "i9",
+        kind: "revenu",
+        obs: [{ day: 28, m: 7, y: 2026, amount: 5204.96 }],
+        syncAmount: true,
+      },
+    ]);
+  });
+
+  it("trois salaires récents rattachés à l'écriture salaire : une seule écriture, sync vers le dernier", () => {
+    const existant = { id: "i9", label: "Salaire", amount: 2500, mode: "salaire" };
+    const r = rowsToEntries(
+      [salaire(), salaire({ day: 27, m: 8, amount: 3450.41 }), salaire({ day: 26, m: 9, amount: 5204.96 })],
+      { incomes: [existant] }
+    );
+    expect(r.newIncomes).toHaveLength(0);
+    expect(r.recurrentes).toHaveLength(3);
+    const c = r.coveredHistory[0];
+    expect(c.id).toBe("i9");
+    expect(c.syncAmount).toBe(true);
+    expect(c.obs).toHaveLength(3);
+    expect(c.obs[2]).toEqual({ day: 26, m: 9, y: 2026, amount: 5204.96 });
+  });
+
+  it("couple ambigu (plusieurs écritures planifiées, aucune rapprochée) : nouvelle écriture", () => {
+    const a = { id: "a", label: "A", amount: 220, day: 5, cat: "vie-quotidienne", sub: "alimentation", freq: "mensuelle" };
+    const b = { id: "b", label: "B", amount: 220, day: 20, cat: "vie-quotidienne", sub: "alimentation", freq: "mensuelle" };
+    const r = rowsToEntries(
+      [row({ amount: -250, cat: "vie-quotidienne", sub: "alimentation", label: "Courses" })],
+      { expenses: [a, b] }
+    );
+    expect(r.newExpenses).toHaveLength(1);
+    expect(r.newExpenses[0].amount).toBe(250);
+  });
+
+  it("le rattachement ne s'applique pas si l'écriture du couple est déjà payée ce mois-là", () => {
+    const elec = { id: "e2", label: "Électricité", amount: 101.34, day: 8, cat: "logement", sub: "energie", freq: "mensuelle" };
+    // Le même mois : l'ancien montant (couvert) et le nouveau (non couvert).
+    const r = rowsToEntries(
+      [row({ amount: -101.34, sub: "energie" }), row({ amount: -95, sub: "energie" })],
+      { expenses: [elec] }
+    );
+    expect(r.recurrentes).toHaveLength(1); // l'ancien montant est couvert
+    expect(r.newExpenses).toHaveLength(1); // le nouveau devient une écriture (ambiguïté)
+    expect(r.newExpenses[0].amount).toBe(95);
+  });
 });
 
 /* ------------------------------------------------------------------ */
