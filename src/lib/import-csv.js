@@ -35,7 +35,7 @@
  * Module sans dépendance React : testable isolément (voir import-csv.test.js).
  */
 
-import { TAXONOMIE, catByLabel, subByLabel, subByOperation, slugify, subIncompressible, addCategory, addSubcategory, taxSub, normalizeLabel } from "./taxonomie.js";
+import { TAXONOMIE, catByLabel, subByLabel, subByOperation, slugify, subIncompressible, subRecurring, addCategory, addSubcategory, taxSub, normalizeLabel } from "./taxonomie.js";
 
 /* ------------------------------------------------------------------ */
 /* Analyse CSV                                                          */
@@ -204,10 +204,7 @@ function modeOf(values) {
 }
 
 /** Le couple (catégorie, sous-catégorie) est-il marqué récurrent 🔁 dans la nomenclature ? */
-function subIsRecurring(cat, sub, taxo) {
-  if (!cat || !sub) return false;
-  return !!taxo.find((c) => c.id === cat)?.subs.find((s) => s.id === sub)?.recurring;
-}
+const subIsRecurring = subRecurring;
 
 /**
  * Convertit les lignes analysées en entrées du modèle. C'est la nomenclature

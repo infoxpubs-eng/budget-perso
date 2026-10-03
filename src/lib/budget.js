@@ -15,9 +15,11 @@ export const ENVELOPPES = [
 ];
 
 import {
+  TAXONOMIE,
   defaultTaxonomie,
   envelopeOf,
   subIncompressible,
+  subRecurring,
   taxCat,
   TAXO_FLAGS_VERSION,
   applyDefaultFlags,
@@ -181,23 +183,26 @@ export function migrateState(raw) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Récurrence d'une dépense planifiée : tout ce qui est mensuel ou annuel est
- * forcément récurrent (prélèvement ou paiement régulier). `freq` décrit le
- * motif de la récurrence (chaque mois / un mois donné), pas l'exceptionnel.
- * Les dépenses non récurrentes n'ont pas leur place dans `expenses` :
- * elles sont exceptionnelles et vivent dans `extras`, à leur date réelle.
+ * Récurrence d'une dépense planifiée : elle est récurrente si son motif
+ * l'est (mensuel ou annuel) ET si son couple catégorie / sous-catégorie est
+ * marqué « récurrente 🔁 » dans la nomenclature — ce sont les paramètres de
+ * la nomenclature qui décident, comme pour l'incompressible. Une dépense
+ * mensuelle sur un couple non 🔁 reste planifiée (budget, simulation,
+ * opérations du mois) mais n'est pas un prélèvement régulier : elle
+ * n'apparaît pas dans l'échéancier récurrent.
  */
-export function isRecurringExpense(e) {
-  return e.freq === "mensuelle" || e.freq === "annuelle";
+export function isRecurringExpense(e, taxo = TAXONOMIE) {
+  return (e.freq === "mensuelle" || e.freq === "annuelle") && subRecurring(e.cat, e.sub, taxo);
 }
 
 /**
- * Récurrence d'un revenu : les salaires (versés chaque mois selon la même
- * règle) et les revenus à jour fixe sont récurrents ; seul le mode `unique`
- * ne l'est pas. Exceptionnel = uniquement ce qui est flagué comme tel.
+ * Récurrence d'un revenu : salaires et revenus à jour fixe sont récurrents
+ * si leur couple est marqué 🔁 (les revenus sans couple précis suivent
+ * « Salaire fixe », marqué 🔁 par défaut) ; seul le mode `unique` ne
+ * l'est jamais.
  */
-export function isRecurringIncome(i) {
-  return i.mode !== "unique";
+export function isRecurringIncome(i, taxo = TAXONOMIE) {
+  return i.mode !== "unique" && subRecurring(i.cat ?? "revenus-travail", i.sub ?? "salaire-fixe", taxo);
 }
 
 /**
@@ -208,16 +213,21 @@ export function isRecurringIncome(i) {
  *   ½ du 13ᵉ mois en juin et novembre, bonus estimé en mars, jour fixe)
  * - opérations exceptionnelles, uniquement celles flaguées comme telles :
  *   dépenses à date précise {y, m, day} et revenus uniques
- * - chaque opération porte `rec` (récurrent) en plus de `inc` (incompressible)
+ * - chaque opération porte `rec` (récurrent) en plus de `inc`
+ *   (incompressible) : `rec` suit le marqueur 🔁 du couple dans la
+ *   nomenclature — une écriture planifiée sur un couple non 🔁 est
+ *   comptée dans le mois (elle est budgétée) mais exclue de l'échéancier
+ *   récurrent.
  *
  * @returns {Array<{day:number,label:string,amount:number,type:"in"|"out",cat:string,sub?:string,inc:boolean,rec:boolean}>}
  */
 export function transactionsOfMonth(state, y, m) {
   const tx = [];
   const dim = daysInMonth(y, m);
+  const taxo = state.taxonomie ?? TAXONOMIE;
 
   for (const e of state.expenses) {
-    if (!isRecurringExpense(e)) continue; // le moteur raisonne en récurrence
+    if (e.freq !== "mensuelle" && e.freq !== "annuelle") continue; // hors modèle
     if (e.freq === "annuelle" && (e.month ?? 1) - 1 !== m) continue;
     tx.push({
       day: Math.min(e.day, dim),
@@ -226,8 +236,8 @@ export function transactionsOfMonth(state, y, m) {
       type: "out",
       cat: e.cat,
       sub: e.sub,
-      inc: !!e.incompressible || subIncompressible(e.cat, e.sub, state.taxonomie),
-      rec: true,
+      inc: !!e.incompressible || subIncompressible(e.cat, e.sub, taxo),
+      rec: subRecurring(e.cat, e.sub, taxo),
     });
   }
 
@@ -246,7 +256,10 @@ export function transactionsOfMonth(state, y, m) {
   }
 
   for (const i of state.incomes) {
-    if (!isRecurringIncome(i)) {
+    // Un revenu non unique est versé chaque mois (salaire ou jour fixe) ;
+    // il n'est « récurrent 🔁 » que si son couple l'est dans la nomenclature.
+    const rec = isRecurringIncome(i, taxo);
+    if (i.mode === "unique") {
       if (i.y !== y || i.m !== m) continue;
       tx.push({
         day: Math.min(i.day, dim),
@@ -260,12 +273,12 @@ export function transactionsOfMonth(state, y, m) {
       });
     } else if (i.mode === "salaire") {
       const day = salaryPayDay(y, m);
-      tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec: true });
+      tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec });
       if (i.treizieme && (m === 5 || m === 10)) {
-        tx.push({ day, label: i.label + " · 13ᵉ mois (½)", amount: i.amount / 2, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec: true });
+        tx.push({ day, label: i.label + " · 13ᵉ mois (½)", amount: i.amount / 2, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec });
       }
       if ((i.bonus ?? 0) > 0 && m === 2) {
-        tx.push({ day, label: i.label + " · bonus estimé", amount: i.bonus, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec: true });
+        tx.push({ day, label: i.label + " · bonus estimé", amount: i.bonus, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec });
       }
     } else {
       tx.push({
@@ -276,7 +289,7 @@ export function transactionsOfMonth(state, y, m) {
         cat: i.cat ?? "revenus-travail",
         sub: i.sub ?? "salaire-fixe",
         inc: false,
-        rec: true,
+        rec,
       });
     }
   }

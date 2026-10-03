@@ -176,6 +176,17 @@ export function taxSub(catId, subId, taxo = TAXONOMIE) {
   return taxCat(catId, taxo)?.subs.find((s) => s.id === subId);
 }
 
+/**
+ * Le couple (catégorie, sous-catégorie) est-il marqué « récurrente 🔁 »
+ * dans la nomenclature ? Sans couple connu, la réponse est non : ce sont
+ * les paramètres de la nomenclature qui décident, comme pour
+ * l'incompressible.
+ */
+export function subRecurring(catId, subId, taxo = TAXONOMIE) {
+  if (!catId || !subId) return false;
+  return !!taxSub(catId, subId, taxo)?.recurring;
+}
+
 /** Nature effective d'une sous-catégorie (redéfinition possible). */
 export function subNature(cat, sub) {
   if (!cat) return null;

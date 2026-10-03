@@ -12,6 +12,20 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.18.0] — 2026-10-03
+
+### Ajouté
+
+- **Échéancier récurrent guidé par la nomenclature** : seuls les couples marqués « récurrente 🔁 » y figurent — une écriture planifiée sur un couple non 🔁 n'est pas un prélèvement ou un abonnement régulier et n'apparaît ni dans l'échéancier du mois, ni dans le calendrier type, ni dans la table 12 mois. Marquer 🔁 une sous-catégorie dans la console 🛠️ Admin y fait immédiatement apparaître toutes ses écritures (et le dé-marquer les en fait sortir).
+- Nouvelle fonction `subRecurring(catId, subId, taxo?)` dans `taxonomie.js` : le couple est-il marqué 🔁 dans la nomenclature ?
+
+### Modifié
+
+- `isRecurringExpense(e, taxo?)` et `isRecurringIncome(i, taxo?)` prennent la nomenclature en paramètre : la récurrence exige désormais le motif (mensuel/annuel, salaire ou jour fixe) **et** le marqueur 🔁 du couple — les paramètres de la nomenclature décident, comme pour l'incompressible.
+- Le marqueur `rec` des opérations du mois suit le 🔁 du couple : une écriture mensuelle sur un couple non 🔁 reste planifiée et comptée dans le budget et la simulation (elle n'est pas perdue), mais porte ✨ au lieu de 🔁.
+- L'onglet Dépenses liste « Dépenses planifiées » avec un badge 🔁 ou « ✨ Non récurrent » par écriture ; l'onglet Revenus distingue 🔁, « ✨ Unique » et « ✨ Non récurrent ».
+- `import-csv.js` réutilise `subRecurring` (plus de helper local).
+
 ## [0.17.0] — 2026-10-03
 
 ### Ajouté

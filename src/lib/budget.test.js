@@ -55,7 +55,7 @@ function baseState() {
     expenses: [
       { id: "e1", label: "Loyer", amount: 800, day: 3, cat: "logement", sub: "loyers-charges", freq: "mensuelle", incompressible: true },
       { id: "e2", label: "Courses", amount: 200, day: 15, cat: "vie-quotidienne", sub: "alimentation", freq: "mensuelle" },
-      { id: "e3", label: "Vacances", amount: 900, day: 10, cat: "voyages-transports", sub: "hebergement", freq: "annuelle", month: 7 },
+      { id: "e3", label: "Assurance habitation", amount: 900, day: 10, cat: "logement", sub: "assurance-habitation", freq: "annuelle", month: 7 },
     ],
     incomes: [
       { id: "i1", label: "Salaire", amount: 2000, day: 27, mode: "fixe" },
@@ -231,9 +231,9 @@ describe("transactionsOfMonth", () => {
 
   it("exclut les dépenses annuelles hors de leur mois", () => {
     const txJan = transactionsOfMonth(baseState(), 2026, 0);
-    expect(txJan.some((t) => t.label === "Vacances")).toBe(false);
+    expect(txJan.some((t) => t.label === "Assurance habitation")).toBe(false);
     const txJuillet = transactionsOfMonth(baseState(), 2026, 6);
-    expect(txJuillet.some((t) => t.label === "Vacances")).toBe(true);
+    expect(txJuillet.some((t) => t.label === "Assurance habitation")).toBe(true);
   });
 
   it("ramène le jour 31 au dernier jour d'un mois de 30 jours", () => {
@@ -843,25 +843,39 @@ describe("marqueurs par défaut de la nomenclature", () => {
 /* ------------------------------------------------------------------ */
 
 describe("récurrence du modèle", () => {
-  it("tout mensuel ou annuel est récurrent", () => {
-    expect(isRecurringExpense({ freq: "mensuelle" })).toBe(true);
-    expect(isRecurringExpense({ freq: "annuelle" })).toBe(true);
-    expect(isRecurringExpense({ freq: "unique" })).toBe(false);
+  it("isRecurringExpense suit le marqueur 🔁 du couple dans la nomenclature", () => {
+    expect(isRecurringExpense({ freq: "mensuelle", cat: "logement", sub: "loyers-charges" })).toBe(true);
+    expect(isRecurringExpense({ freq: "annuelle", cat: "logement", sub: "assurance-habitation" })).toBe(true);
+    expect(isRecurringExpense({ freq: "mensuelle", cat: "loisirs", sub: "restaurants" })).toBe(false);
+    expect(isRecurringExpense({ freq: "mensuelle", cat: "loisirs" })).toBe(false); // sans couple connu
+    expect(isRecurringExpense({ freq: "unique", cat: "logement", sub: "loyers-charges" })).toBe(false);
   });
 
-  it("les salaires et revenus à jour fixe sont récurrents, les uniques non", () => {
-    expect(isRecurringIncome({ mode: "salaire" })).toBe(true);
+  it("isRecurringIncome suit le marqueur 🔁 du couple (Salaire fixe par défaut)", () => {
+    expect(isRecurringIncome({ mode: "salaire" })).toBe(true); // défaut Salaire fixe 🔁
     expect(isRecurringIncome({ mode: "fixe" })).toBe(true);
     expect(isRecurringIncome({ mode: "unique" })).toBe(false);
+    expect(isRecurringIncome({ mode: "fixe", cat: "revenus-epargne", sub: "placements" })).toBe(false);
+  });
+
+  it("marquer 🔁 une sous-catégorie rend ses écritures récurrentes", () => {
+    const base = defaultTaxonomie();
+    expect(isRecurringExpense({ freq: "mensuelle", cat: "loisirs", sub: "restaurants" }, base)).toBe(false);
+    const taxo = setSubFlags(base, "loisirs", "restaurants", { recurring: true, incompressible: false });
+    expect(isRecurringExpense({ freq: "mensuelle", cat: "loisirs", sub: "restaurants" }, taxo)).toBe(true);
+    const taxoIn = setSubFlags(base, "revenus-epargne", "placements", { recurring: true, incompressible: false });
+    expect(isRecurringIncome({ mode: "fixe", cat: "revenus-epargne", sub: "placements" }, taxoIn)).toBe(true);
   });
 
   it("transactionsOfMonth marque chaque opération rec (récurrent) ou non", () => {
     const state = baseState();
     state.extras.push({ id: "x1", label: "Réparation voiture", amount: 400, day: 18, y: 2026, m: 0, cat: "exceptionnelles" });
     state.incomes.push({ id: "i2", label: "Remboursement", amount: 1.35, mode: "unique", day: 30, y: 2026, m: 0, cat: "services-financiers", sub: "remboursement-frais" });
+    state.expenses.push({ id: "e8", label: "Resto mensuel", amount: 40, day: 5, cat: "loisirs", sub: "restaurants", freq: "mensuelle" });
     const tx = transactionsOfMonth(state, 2026, 0);
     expect(tx.find((t) => t.label === "Loyer").rec).toBe(true);
     expect(tx.find((t) => t.label === "Salaire").rec).toBe(true);
+    expect(tx.find((t) => t.label === "Resto mensuel").rec).toBe(false); // couple non 🔁
     expect(tx.find((t) => t.label === "Réparation voiture").rec).toBe(false);
     expect(tx.find((t) => t.label === "Remboursement").rec).toBe(false);
     expect(tx.every((t) => typeof t.rec === "boolean")).toBe(true);
@@ -903,6 +917,21 @@ describe("récurrence du modèle", () => {
     expect(sched.some((d) => d.ops.some((o) => o.label === "Remboursement"))).toBe(false);
   });
 
+  it("recurringSchedule exclut les couples non marqués 🔁, marquer 🔁 les y fait entrer", () => {
+    const state = baseState();
+    state.expenses.push({ id: "e8", label: "Resto mensuel", amount: 40, day: 5, cat: "loisirs", sub: "restaurants", freq: "mensuelle" });
+    // planifiée dans le mois (budgétée), absente de l'échéancier récurrent
+    const tx = transactionsOfMonth(state, 2026, 0);
+    expect(tx.some((t) => t.label === "Resto mensuel")).toBe(true);
+    expect(recurringSchedule(state, 2026, 0).some((d) => d.ops.some((o) => o.label === "Resto mensuel"))).toBe(false);
+    // le marqueur 🔁 du couple décide : il apparaît alors dans l'échéancier
+    state.taxonomie = setSubFlags(defaultTaxonomie(), "loisirs", "restaurants", { recurring: true, incompressible: false });
+    expect(recurringSchedule(state, 2026, 0).some((d) => d.ops.some((o) => o.label === "Resto mensuel"))).toBe(true);
+    const t = recurringMonthTotals(state, 2026, 0);
+    expect(t.count).toBe(4); // Loyer, Resto mensuel, Courses, Salaire
+    expect(t.totalOut).toBe(1040);
+  });
+
   it("migrateState ne crée jamais de dépense exceptionnelle par défaut", () => {
     const s = migrateState({ soldeDepart: 500 });
     expect(s.extras).toEqual([]);
@@ -922,7 +951,7 @@ describe("récurrence du modèle", () => {
   });
 
   it("recurringMonthTotals ne compte la dépense annuelle que dans son mois", () => {
-    const state = baseState(); // Vacances -900 en juillet
+    const state = baseState(); // Assurance habitation -900 en juillet
     const jan = recurringMonthTotals(state, 2026, 0);
     const juil = recurringMonthTotals(state, 2026, 6);
     expect(jan.count).toBe(3);

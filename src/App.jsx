@@ -738,7 +738,7 @@ export default function App() {
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="space-y-6 lg:col-span-2">
               <Card>
-                <h2 className="mb-3 font-semibold">Dépenses récurrentes ({state.expenses.length})</h2>
+                <h2 className="mb-3 font-semibold">Dépenses planifiées ({state.expenses.length})</h2>
                 <div className="space-y-2">
                   {state.expenses.map((e) => {
                     const c = taxCat(e.cat, taxo);
@@ -752,7 +752,9 @@ export default function App() {
                             <span>Le {e.day} du mois</span>
                             <span>·</span>
                             {e.freq === "annuelle" ? <span>{MONTHS[(e.month ?? 1) - 1]}</span> : <span>Chaque mois</span>}
-                            {isRecurringExpense(e) && <RecBadge />}
+                            {isRecurringExpense(e, taxo)
+                              ? <RecBadge />
+                              : <Badge color="#f59e0b">✨ Non récurrent</Badge>}
                             <Badge color={env ? env.color : "#94a3b8"}>{c ? c.label : "?"}</Badge>
                             {s && <span>{s.label}</span>}
                             {e.incompressible && <IncBadge />}
@@ -854,7 +856,11 @@ export default function App() {
                         ) : (
                           <span>Le {i.day} du mois</span>
                         )}
-                        {isRecurringIncome(i) ? <RecBadge /> : <Badge color="#f59e0b">✨ Unique</Badge>}
+                        {isRecurringIncome(i, taxo)
+                          ? <RecBadge />
+                          : i.mode === "unique"
+                            ? <Badge color="#f59e0b">✨ Unique</Badge>
+                            : <Badge color="#f59e0b">✨ Non récurrent</Badge>}
                         {i.cat && <Badge color="#10b981">{labelOf(i.cat, i.sub, taxo)}</Badge>}
                       </div>
                     </div>
@@ -1012,9 +1018,9 @@ export default function App() {
                 </span>
               </div>
               <p className="mb-3 text-xs text-slate-500">
-                Les dates des prélèvements et paiements récurrents sont souvent similaires d'un mois sur l'autre :
-                elles dessinent à l'avance la trajectoire du solde et les point bas des mois à venir.
-                Le solde indiqué est celui de fin de journée dans la simulation du mois.
+                Seuls les couples marqués « récurrente 🔁 » dans la nomenclature (console 🛠️ Admin)
+                y figurent : ce sont eux qui dessinent la trajectoire du solde et les point bas des
+                mois à venir. Le solde indiqué est celui de fin de journée dans la simulation du mois.
               </p>
               <div className="flex flex-wrap gap-2">
                 {echeancier.map((d) => (
@@ -1046,11 +1052,13 @@ export default function App() {
               <Card>
                 <h2 className="mb-1 font-semibold">Calendrier type des récurrents</h2>
                 <p className="mb-3 text-xs text-slate-500">
-                  Paiements et revenus récurrents du budget, à leurs dates habituelles (les mois courts ramènent le jour 31 en fin de mois).
+                  Paiements et revenus des couples marqués 🔁, à leurs dates habituelles
+                  (les mois courts ramènent le jour 31 en fin de mois). Marquez une sous-catégorie
+                  🔁 dans la console 🛠️ Admin pour la voir apparaître ici.
                 </p>
                 <div className="space-y-2">
                   {[
-                    ...state.expenses.filter(isRecurringExpense).map((e) => ({
+                    ...state.expenses.filter((e) => isRecurringExpense(e, taxo)).map((e) => ({
                       key: e.id,
                       label: e.label,
                       amount: -e.amount,
@@ -1058,7 +1066,7 @@ export default function App() {
                       when: e.freq === "annuelle" ? "Chaque " + MONTHS[(e.month ?? 1) - 1].toLowerCase() : "Chaque mois",
                       inc: !!e.incompressible,
                     })),
-                    ...state.incomes.filter(isRecurringIncome).map((i) => ({
+                    ...state.incomes.filter((i) => isRecurringIncome(i, taxo)).map((i) => ({
                       key: i.id,
                       label: i.label + (i.treizieme ? " (½ 13ᵉ mois en juin + nov.)" : "") + ((i.bonus ?? 0) > 0 ? " (bonus en mars)" : ""),
                       amount: i.amount,
@@ -1079,7 +1087,7 @@ export default function App() {
                         </span>
                       </div>
                     ))}
-                  {state.expenses.length + state.incomes.filter(isRecurringIncome).length === 0 && (
+                  {state.expenses.filter((e) => isRecurringExpense(e, taxo)).length + state.incomes.filter((i) => isRecurringIncome(i, taxo)).length === 0 && (
                     <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
                       Aucun récurrent enregistré.
                     </div>
