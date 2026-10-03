@@ -24,6 +24,12 @@ import {
   depenseCats,
   revenuOptions,
   labelOf,
+  defaultTaxonomie,
+  slugify,
+  addCategory,
+  addSubcategory,
+  setSubFlags,
+  subIncompressible,
 } from "./taxonomie.js";
 
 /* ------------------------------------------------------------------ */
@@ -560,3 +566,128 @@ describe("simulate — solde d'ouverture explicite", () => {
     expect(m1.end).toBe(sims[1].end);
   });
 });
+
+describe("console d'administration — nomenclature dynamique", () => {
+  it("slugify produit un identifiant technique robuste", () => {
+    expect(slugify("Énergie & chauffage")).toBe("energie-chauffage");
+    expect(slugify("  Frais de garde d'enfants ")).toBe("frais-de-garde-d-enfants");
+    expect(slugify("???")).toBe("cat");
+  });
+
+  it("defaultTaxonomie renvoie une copie indépendante", () => {
+    const t = defaultTaxonomie();
+    expect(t.length).toBe(TAXONOMIE.length);
+    t[0].subs[0].label = "MODIFIÉ";
+    expect(TAXONOMIE[0].subs[0].label).not.toBe("MODIFIÉ");
+  });
+
+  it("addCategory ajoute une catégorie avec identifiant unique", () => {
+    const t = defaultTaxonomie();
+    const next = addCategory(t, { label: "Assurance vie", nature: "depense", env: "domestiques" });
+    const added = next[next.length - 1];
+    expect(added.id).toBe("assurance-vie");
+    expect(added.subs).toHaveLength(0);
+    expect(next.length).toBe(t.length + 1);
+    expect(t.length).toBe(TAXONOMIE.length); // pure : l'original est intact
+  });
+
+  it("addCategory refuse un libellé vide ou déjà existant (tolérant aux accents)", () => {
+    const t = defaultTaxonomie();
+    expect(() => addCategory(t, { label: "  " })).toThrow();
+    expect(() => addCategory(t, { label: "Logement" })).toThrow();
+    expect(() => addCategory(t, { label: "LOGEMENT" })).toThrow();
+  });
+
+  it("addSubcategory ajoute un couple avec ses indicateurs", () => {
+    const t = defaultTaxonomie();
+    const next = addSubcategory(t, "logement", {
+      label: "Taxe foncière",
+      recurring: true,
+      incompressible: true,
+    });
+    const sub = taxSub("logement", "taxe-fonciere", next);
+    expect(sub.label).toBe("Taxe foncière");
+    expect(sub.recurring).toBe(true);
+    expect(sub.incompressible).toBe(true);
+  });
+
+  it("addSubcategory déduit les identifiants en collision et rejette les doublons", () => {
+    const t = addSubcategory(defaultTaxonomie(), "logement", { label: "Assurance" });
+    const t2 = addSubcategory(t, "logement", { label: "Assurance habitation" });
+    expect(taxSub("logement", "assurance", t2)).toBeTruthy();
+    expect(taxSub("logement", "assurance-habitation", t2)).toBeTruthy();
+    expect(() => addSubcategory(t2, "logement", { label: "ASSURANCE" })).toThrow();
+    expect(() => addSubcategory(t2, "catégorie-inconnue", { label: "X" })).toThrow();
+  });
+
+  it("addSubcategory permet de redéfinir la nature (remboursement)", () => {
+    const next = addSubcategory(defaultTaxonomie(), "logement", {
+      label: "Remboursement travaux",
+      nature: "revenu",
+    });
+    const cat = taxCat("logement", next);
+    const sub = taxSub("logement", "remboursement-travaux", next);
+    expect(subNatureOf(cat, sub)).toBe("revenu");
+  });
+
+  it("setSubFlags bascule les indicateurs sans toucher au reste", () => {
+    const next = setSubFlags(defaultTaxonomie(), "vie-quotidienne", "alimentation", {
+      recurring: true,
+      incompressible: false,
+    });
+    expect(subIncompressible("vie-quotidienne", "alimentation", next)).toBe(false);
+    expect(taxSub("vie-quotidienne", "alimentation", next).recurring).toBe(true);
+    expect(() => setSubFlags(next, "vie-quotidienne", "inconnue", { recurring: false, incompressible: false })).toThrow();
+  });
+
+  it("migrateState fournit et normalise la nomenclature de l'état", () => {
+    const s1 = migrateState({ soldeDepart: 0 });
+    expect(Array.isArray(s1.taxonomie)).toBe(true);
+    expect(s1.taxonomie.length).toBe(TAXONOMIE.length);
+    // taxonomie personnalisée préservée, indicateurs ramenés à des booléens
+    const custom = addSubcategory(defaultTaxonomie(), "logement", {
+      label: "Test admin",
+      incompressible: "oui",
+    });
+    const s2 = migrateState({ taxonomie: custom });
+    expect(s2.taxonomie.length).toBe(custom.length);
+    expect(taxSub("logement", "test-admin", s2.taxonomie).incompressible).toBe(true);
+    // structure invalide → nomenclature par défaut
+    const s3 = migrateState({ taxonomie: "pas une liste" });
+    expect(s3.taxonomie.length).toBe(TAXONOMIE.length);
+  });
+
+  it("une sous-catégorie marquée incompressible rend ses dépenses incompressibles", () => {
+    const st = migrateState({
+      soldeDepart: 0,
+      expenses: [
+        { id: "e1", label: "Courses", amount: 200, day: 5, cat: "vie-quotidienne", sub: "alimentation", freq: "mensuelle" },
+      ],
+    });
+    const before = monthlyExpenses(st, 2026, 0);
+    expect(before.incompressible).toBe(0);
+    st.taxonomie = setSubFlags(st.taxonomie, "vie-quotidienne", "alimentation", {
+      recurring: false,
+      incompressible: true,
+    });
+    const after = monthlyExpenses(st, 2026, 0);
+    expect(after.incompressible).toBe(200);
+    expect(after.discretionnaire).toBe(0);
+    // l'opération du mois porte aussi le marqueur 🔒
+    const tx = transactionsOfMonth(st, 2026, 0);
+    expect(tx[0].inc).toBe(true);
+  });
+
+  it("les fonctions de recherche utilisent la nomenclature de l'état", () => {
+    const custom = addCategory(defaultTaxonomie(), { label: "Assurance vie", env: "domestiques" });
+    const withSub = addSubcategory(custom, "assurance-vie", { label: "Frais de contrat" });
+    expect(taxCat("assurance-vie", withSub).label).toBe("Assurance vie");
+    expect(depenseCats(withSub).some((c) => c.id === "assurance-vie")).toBe(true);
+    expect(envelopeOf("assurance-vie", "frais-de-contrat", withSub)).toBe("domestiques");
+    expect(revenuOptions(withSub).length).toBe(revenuOptions(TAXONOMIE).length);
+  });
+});
+
+function subNatureOf(cat, sub) {
+  return sub.nature ?? cat.nature;
+}

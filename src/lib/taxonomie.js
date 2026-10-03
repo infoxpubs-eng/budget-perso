@@ -167,13 +167,13 @@ export const TAXONOMIE = [
 /* ------------------------------------------------------------------ */
 
 /** Catégorie par identifiant, ou undefined. */
-export function taxCat(id) {
-  return TAXONOMIE.find((c) => c.id === id);
+export function taxCat(id, taxo = TAXONOMIE) {
+  return taxo.find((c) => c.id === id);
 }
 
 /** Sous-catégorie d'une catégorie, ou undefined. */
-export function taxSub(catId, subId) {
-  return taxCat(catId)?.subs.find((s) => s.id === subId);
+export function taxSub(catId, subId, taxo = TAXONOMIE) {
+  return taxCat(catId, taxo)?.subs.find((s) => s.id === subId);
 }
 
 /** Nature effective d'une sous-catégorie (redéfinition possible). */
@@ -184,9 +184,9 @@ export function subNature(cat, sub) {
 }
 
 /** Libellé lisible d'un couple (catégorie, sous-catégorie). */
-export function labelOf(catId, subId) {
-  const c = taxCat(catId);
-  const s = subId ? taxSub(catId, subId) : null;
+export function labelOf(catId, subId, taxo = TAXONOMIE) {
+  const c = taxCat(catId, taxo);
+  const s = subId ? taxSub(catId, subId, taxo) : null;
   if (!c) return "?";
   return s ? c.label + " · " + s.label : c.label;
 }
@@ -201,8 +201,8 @@ export function labelOf(catId, subId) {
  * sinon on prend celle de la catégorie, sinon le fourre-tout "sports & autres".
  * Les dépenses exceptionnelles relèvent toujours de l'enveloppe "exceptionnelles".
  */
-export function envelopeOf(catId, subId) {
-  const c = taxCat(catId);
+export function envelopeOf(catId, subId, taxo = TAXONOMIE) {
+  const c = taxCat(catId, taxo);
   if (!c) return "sports";
   const s = subId ? c.subs.find((x) => x.id === subId) : null;
   return s?.env ?? c.env ?? "sports";
@@ -213,17 +213,17 @@ export function envelopeOf(catId, subId) {
 /* ------------------------------------------------------------------ */
 
 /** Catégories éligibles pour une dépense (nature dépense, sous-catégories filtrées). */
-export function depenseCats() {
-  return TAXONOMIE.map((c) => ({
+export function depenseCats(taxo = TAXONOMIE) {
+  return taxo.map((c) => ({
     ...c,
     subs: c.subs.filter((s) => subNature(c, s) === "depense"),
   })).filter((c) => c.nature === "depense");
 }
 
 /** Options « Catégorie — Sous-catégorie » éligibles pour un revenu. */
-export function revenuOptions() {
+export function revenuOptions(taxo = TAXONOMIE) {
   const out = [];
-  for (const c of TAXONOMIE) {
+  for (const c of taxo) {
     for (const s of c.subs) {
       if (subNature(c, s) === "revenu") {
         out.push({ value: c.id + "|" + s.id, label: c.label + " — " + s.label });
@@ -256,15 +256,15 @@ export function normalizeLabel(s) {
 }
 
 /** Catégorie dont le libellé correspond (tolérant aux accents / «…»). */
-export function catByLabel(label) {
+export function catByLabel(label, taxo = TAXONOMIE) {
   const n = normalizeLabel(label);
   if (!n) return undefined;
-  return TAXONOMIE.find((c) => normalizeLabel(c.label) === n);
+  return taxo.find((c) => normalizeLabel(c.label) === n);
 }
 
 /** Sous-catégorie d'une catégorie dont le libellé correspond. */
-export function subByLabel(catId, subLabel) {
-  const c = taxCat(catId);
+export function subByLabel(catId, subLabel, taxo = TAXONOMIE) {
+  const c = taxCat(catId, taxo);
   const n = normalizeLabel(subLabel);
   if (!c || !n) return undefined;
   return c.subs.find((s) => normalizeLabel(s.label) === n);
@@ -277,12 +277,116 @@ export function subByLabel(catId, subLabel) {
  * ignorés pour éviter les faux positifs. Sert de repli à l'import CSV quand
  * la colonne Sous-Catégorie est inconnue.
  */
-export function subByOperation(catId, opLabel) {
-  const c = taxCat(catId);
+export function subByOperation(catId, opLabel, taxo = TAXONOMIE) {
+  const c = taxCat(catId, taxo);
   const n = normalizeLabel(opLabel);
   if (!c || !n) return undefined;
   return c.subs.find((s) => {
     const sn = normalizeLabel(s.label);
     return sn.length >= 4 && n.includes(sn);
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Console d'administration de la nomenclature                          */
+/* ------------------------------------------------------------------ */
+
+/** Copie profonde et indépendante de la nomenclature par défaut. */
+export function defaultTaxonomie() {
+  return JSON.parse(JSON.stringify(TAXONOMIE));
+}
+
+/** Identifiant technique à partir d'un libellé (accents retirés, minuscules). */
+export function slugify(label) {
+  return (
+    normalizeLabel(label)
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "cat"
+  );
+}
+
+/** Identifiant de catégorie unique (suffixe -2, -3… en cas de collision). */
+function uniqueCatId(taxo, base) {
+  let id = base;
+  let k = 2;
+  while (taxo.some((c) => c.id === id)) id = base + "-" + k++;
+  return id;
+}
+
+/** Identifiant de sous-catégorie unique dans sa catégorie. */
+function uniqueSubId(cat, base) {
+  let id = base;
+  let k = 2;
+  while (cat.subs.some((s) => s.id === id)) id = base + "-" + k++;
+  return id;
+}
+
+/**
+ * Ajoute une catégorie (sans sous-catégorie) et renvoie la nouvelle
+ * nomenclature — fonction pure, l'originale n'est pas modifiée.
+ * @throws {Error} libellé vide ou déjà existant (comparaison tolérante)
+ */
+export function addCategory(taxo, { label, nature = "depense", env = "sports" }) {
+  const l = String(label ?? "").trim();
+  if (!l) throw new Error("Libellé de catégorie requis");
+  const norm = normalizeLabel(l);
+  if (taxo.some((c) => normalizeLabel(c.label) === norm)) {
+    throw new Error("Catégorie déjà existante : " + l);
+  }
+  const cat = { id: uniqueCatId(taxo, slugify(l)), label: l, nature, subs: [] };
+  if (nature === "depense") cat.env = env;
+  return [...taxo, cat];
+}
+
+/**
+ * Ajoute un couple (catégorie existante, nouvelle sous-catégorie) avec ses
+ * indicateurs « récurrente » / « incompressible » — fonction pure.
+ * `nature` redéfinit éventuellement la nature de la sous-catégorie
+ * (ex. remboursement sous une catégorie de dépense).
+ * @throws {Error} catégorie inconnue, libellé vide ou déjà présent
+ */
+export function addSubcategory(taxo, catId, { label, recurring = false, incompressible = false, nature } = {}) {
+  const cat = taxo.find((c) => c.id === catId);
+  if (!cat) throw new Error("Catégorie inconnue : " + catId);
+  const l = String(label ?? "").trim();
+  if (!l) throw new Error("Libellé de sous-catégorie requis");
+  const norm = normalizeLabel(l);
+  if (cat.subs.some((s) => normalizeLabel(s.label) === norm)) {
+    throw new Error("Sous-catégorie déjà existante : " + l);
+  }
+  const sub = {
+    id: uniqueSubId(cat, slugify(l)),
+    label: l,
+    recurring: !!recurring,
+    incompressible: !!incompressible,
+  };
+  if (nature) sub.nature = nature;
+  return taxo.map((c) => (c.id === catId ? { ...c, subs: [...c.subs, sub] } : c));
+}
+
+/**
+ * Remplace les indicateurs « récurrente » / « incompressible » d'une
+ * sous-catégorie — fonction pure. Les deux valeurs sont requises
+ * (passer l'ancienne valeur pour ne changer qu'un indicateur).
+ * @throws {Error} catégorie ou sous-catégorie inconnue
+ */
+export function setSubFlags(taxo, catId, subId, { recurring, incompressible }) {
+  const cat = taxo.find((c) => c.id === catId);
+  if (!cat) throw new Error("Catégorie inconnue : " + catId);
+  if (!cat.subs.some((s) => s.id === subId)) throw new Error("Sous-catégorie inconnue : " + subId);
+  return taxo.map((c) =>
+    c.id !== catId
+      ? c
+      : {
+          ...c,
+          subs: c.subs.map((s) =>
+            s.id !== subId ? s : { ...s, recurring: !!recurring, incompressible: !!incompressible }
+          ),
+        }
+  );
+}
+
+/** Indique si une sous-catégorie est marquée incompressible. */
+export function subIncompressible(catId, subId, taxo = TAXONOMIE) {
+  return !!taxSub(catId, subId, taxo)?.incompressible;
 }

@@ -14,7 +14,7 @@ export const ENVELOPPES = [
   { id: "exceptionnelles", label: "Exceptionnelles", color: "#8b5cf6" },
 ];
 
-import { envelopeOf, taxCat } from "./taxonomie.js";
+import { defaultTaxonomie, envelopeOf, subIncompressible, taxCat } from "./taxonomie.js";
 
 /**
  * Correspondance entre les anciennes catégories plates (≤ v0.2.x) et la
@@ -107,6 +107,30 @@ function migrateCat(entry) {
 }
 
 /**
+ * Normalise la nomenclature personnalisée d'un état sauvegardé : champs
+ * manquants complétés, indicateurs « récurrente » / « incompressible »
+ * ramenés à des booléens. Retourne la nomenclature par défaut si absente
+ * ou structure invalide.
+ */
+function normalizeTaxonomie(taxo) {
+  const valid =
+    Array.isArray(taxo) &&
+    taxo.length > 0 &&
+    taxo.every((c) => c && c.id && typeof c.label === "string" && Array.isArray(c.subs));
+  if (!valid) return defaultTaxonomie();
+  return taxo.map((c) => ({
+    nature: "depense",
+    env: "sports",
+    ...c,
+    subs: (c.subs ?? []).map((sub) => ({
+      ...sub,
+      recurring: !!sub.recurring,
+      incompressible: !!sub.incompressible,
+    })),
+  }));
+}
+
+/**
  * Complète un état (chargé du localStorage ou importé) avec les valeurs par
  * défaut des champs ajoutés au fil des versions, sans perdre les données.
  * Les anciennes catégories plates sont converties vers la nomenclature
@@ -133,6 +157,7 @@ export function migrateState(raw) {
     sub: "salaire-fixe",
     ...i,
   }));
+  s.taxonomie = normalizeTaxonomie(s.taxonomie);
   return s;
 }
 
@@ -163,7 +188,7 @@ export function transactionsOfMonth(state, y, m) {
       type: "out",
       cat: e.cat,
       sub: e.sub,
-      inc: !!e.incompressible,
+      inc: !!e.incompressible || subIncompressible(e.cat, e.sub, state.taxonomie),
     });
   }
 
@@ -176,7 +201,7 @@ export function transactionsOfMonth(state, y, m) {
       type: "out",
       cat: x.cat ?? "logement",
       sub: x.sub ?? "frais-exceptionnels",
-      inc: !!x.incompressible,
+      inc: !!x.incompressible || subIncompressible(x.cat, x.sub, state.taxonomie),
     });
   }
 
@@ -351,6 +376,7 @@ export function simulate(state, startY, startM, opening = state.soldeDepart) {
  *            incompressible: number, discretionnaire: number, total: number}}
  */
 export function monthlyExpenses(state, y, m) {
+  const taxo = state.taxonomie;
   const byEnv = {};
   const incByEnv = {};
   for (const e of ENVELOPPES) {
@@ -365,7 +391,7 @@ export function monthlyExpenses(state, y, m) {
 
   const add = (env, cat, amount, inc, sub) => {
     if (byEnv[env] === undefined) env = "exceptionnelles";
-    const c = taxCat(cat) ? cat : "logement";
+    const c = taxCat(cat, taxo) ? cat : "logement";
     byEnv[env] += amount;
     incByEnv[env] += inc ? amount : 0;
     byCat[c] = (byCat[c] ?? 0) + amount;
@@ -378,12 +404,24 @@ export function monthlyExpenses(state, y, m) {
 
   for (const e of state.expenses) {
     if (freqInMonth(e.freq, e.month, m)) {
-      add(envelopeOf(e.cat, e.sub), e.cat, e.amount, !!e.incompressible, e.sub);
+      add(
+        envelopeOf(e.cat, e.sub, taxo),
+        e.cat,
+        e.amount,
+        !!e.incompressible || subIncompressible(e.cat, e.sub, taxo),
+        e.sub
+      );
     }
   }
   for (const x of state.extras ?? []) {
     if (x.y === y && x.m === m) {
-      add("exceptionnelles", x.cat ?? "logement", x.amount, !!x.incompressible, x.sub ?? "frais-exceptionnels");
+      add(
+        "exceptionnelles",
+        x.cat ?? "logement",
+        x.amount,
+        !!x.incompressible || subIncompressible(x.cat, x.sub, taxo),
+        x.sub ?? "frais-exceptionnels"
+      );
     }
   }
 

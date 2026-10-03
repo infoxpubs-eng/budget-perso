@@ -28,7 +28,19 @@ import {
   migrateState,
   monthlyExpenses,
 } from "./lib/budget.js";
-import { TAXONOMIE, depenseCats, revenuOptions, taxCat, taxSub, labelOf, envelopeOf } from "./lib/taxonomie.js";
+import {
+  TAXONOMIE,
+  depenseCats,
+  revenuOptions,
+  taxCat,
+  taxSub,
+  labelOf,
+  envelopeOf,
+  subNature,
+  addCategory,
+  addSubcategory,
+  setSubFlags,
+} from "./lib/taxonomie.js";
 import { parseCsv, rowsToEntries } from "./lib/import-csv.js";
 
 /* ============================== Données initiales ============================== */
@@ -226,6 +238,9 @@ export default function App() {
 
   const start = useMemo(() => ({ y: now.getFullYear(), m: now.getMonth() }), []);
 
+  // Nomenclature personnalisée (console d'administration), persistée avec l'état.
+  const taxo = useMemo(() => state.taxonomie ?? TAXONOMIE, [state.taxonomie]);
+
   // ----- Ancrage de la simulation sur les mois chargés -----
   // Le solde de départ s'applique à la date chargée la plus lointaine
   // (simStart) ; l'historique enchaîne les mois jusqu'au mois courant,
@@ -341,7 +356,7 @@ export default function App() {
     reader.onload = () => {
       let parsed;
       try {
-        parsed = parseCsv(String(reader.result));
+        parsed = parseCsv(String(reader.result), state.taxonomie);
       } catch (e) {
         alert("Fichier CSV non reconnu : " + e.message);
         return;
@@ -408,6 +423,7 @@ export default function App() {
     { id: "depenses", label: "Dépenses" },
     { id: "revenus", label: "Revenus" },
     { id: "budget", label: "Budget par catégorie" },
+    { id: "admin", label: "🛠️ Admin" },
   ];
 
   const btnCls = "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-100";
@@ -666,9 +682,9 @@ export default function App() {
                 <h2 className="mb-3 font-semibold">Dépenses récurrentes ({state.expenses.length})</h2>
                 <div className="space-y-2">
                   {state.expenses.map((e) => {
-                    const c = taxCat(e.cat);
-                    const s = taxSub(e.cat, e.sub);
-                    const env = ENVELOPPES.find((x) => x.id === envelopeOf(e.cat, e.sub));
+                    const c = taxCat(e.cat, taxo);
+                    const s = taxSub(e.cat, e.sub, taxo);
+                    const env = ENVELOPPES.find((x) => x.id === envelopeOf(e.cat, e.sub, taxo));
                     return (
                       <div key={e.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
                         <div className="min-w-0">
@@ -708,8 +724,8 @@ export default function App() {
                 <p className="mb-3 text-xs text-slate-500">Dépenses unitaires, à une date précise.</p>
                 <div className="space-y-2">
                   {state.extras.map((x) => {
-                    const c = taxCat(x.cat);
-                    const s = taxSub(x.cat, x.sub);
+                    const c = taxCat(x.cat, taxo);
+                    const s = taxSub(x.cat, x.sub, taxo);
                     const env = ENVELOPPES.find((x2) => x2.id === "exceptionnelles");
                     return (
                       <div key={x.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
@@ -745,8 +761,8 @@ export default function App() {
             </div>
 
             <div className="space-y-6">
-              <ExpenseForm expenses={state.expenses} onAdd={addExpense} />
-              <ExtraForm sims={sims} monthIdx={simIdx} expenses={state.expenses} onAdd={addExtra} />
+              <ExpenseForm expenses={state.expenses} onAdd={addExpense} taxo={taxo} />
+              <ExtraForm sims={sims} monthIdx={simIdx} expenses={state.expenses} onAdd={addExtra} taxo={taxo} />
             </div>
           </div>
         )}
@@ -778,7 +794,7 @@ export default function App() {
                         ) : (
                           <span>Le {i.day} du mois</span>
                         )}
-                        {i.cat && <Badge color="#10b981">{labelOf(i.cat, i.sub)}</Badge>}
+                        {i.cat && <Badge color="#10b981">{labelOf(i.cat, i.sub, taxo)}</Badge>}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -801,7 +817,7 @@ export default function App() {
               </div>
             </Card>
 
-            <IncomeForm sims={sims} monthIdx={simIdx} onAdd={addIncome} />
+            <IncomeForm sims={sims} monthIdx={simIdx} onAdd={addIncome} taxo={taxo} />
           </div>
         )}
 
@@ -856,7 +872,7 @@ export default function App() {
                         <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                           {detail.map((d, i) => (
                             <span key={i}>
-                              {labelOf(d.cat, d.sub)} : <span className="font-medium text-slate-700">{fmt(d.amount)}</span>
+                              {labelOf(d.cat, d.sub, taxo)} : <span className="font-medium text-slate-700">{fmt(d.amount)}</span>
                             </span>
                           ))}
                         </div>
@@ -923,6 +939,9 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* ------------------------------ ADMIN ------------------------------ */}
+        {tab === "admin" && <AdminPanel state={state} setState={setState} />}
       </div>
     </div>
   );
@@ -950,8 +969,8 @@ function recurrencesBySub(expenses) {
   return map;
 }
 
-function ExpenseForm({ expenses = [], onAdd }) {
-  const DEPCATS = useMemo(() => depenseCats(), []);
+function ExpenseForm({ expenses = [], onAdd, taxo = TAXONOMIE }) {
+  const DEPCATS = useMemo(() => depenseCats(taxo), [taxo]);
   const recBySub = useMemo(() => recurrencesBySub(expenses), [expenses]);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState(0);
@@ -966,8 +985,14 @@ function ExpenseForm({ expenses = [], onAdd }) {
 
   const changeCat = (id) => {
     setCat(id);
-    const first = DEPCATS.find((c) => c.id === id)?.subs[0]?.id ?? "";
-    setSub(first);
+    const first = DEPCATS.find((c) => c.id === id)?.subs[0];
+    setSub(first?.id ?? "");
+    setInc(!!first?.incompressible);
+  };
+
+  const changeSub = (id) => {
+    setSub(id);
+    setInc(!!subs.find((s) => s.id === id)?.incompressible);
   };
 
   const submit = () => {
@@ -1020,13 +1045,13 @@ function ExpenseForm({ expenses = [], onAdd }) {
             </select>
           </Field>
           <Field label="Sous-catégorie">
-            <select className={inputCls} value={sub} onChange={(e) => setSub(e.target.value)} disabled={subs.length === 0}>
+            <select className={inputCls} value={sub} onChange={(e) => changeSub(e.target.value)} disabled={subs.length === 0}>
               {subs.length === 0 && <option value="">—</option>}
               {subs.map((s) => {
                 const rec = recBySub.get(cat + "|" + s.id);
                 return (
                   <option key={s.id} value={s.id}>
-                    {s.label + (rec ? " · récurrente" : "") + (rec?.inc ? " 🔒" : "")}
+                    {s.label + (rec ? " · récurrente" : "") + (s.incompressible || rec?.inc ? " 🔒" : "") + (s.recurring ? " 🔁" : "")}
                   </option>
                 );
               })}
@@ -1074,8 +1099,8 @@ function ExpenseForm({ expenses = [], onAdd }) {
   );
 }
 
-function ExtraForm({ sims, monthIdx, expenses = [], onAdd }) {
-  const DEPCATS = useMemo(() => depenseCats(), []);
+function ExtraForm({ sims, monthIdx, expenses = [], onAdd, taxo = TAXONOMIE }) {
+  const DEPCATS = useMemo(() => depenseCats(taxo), [taxo]);
   const recBySub = useMemo(() => recurrencesBySub(expenses), [expenses]);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState(0);
@@ -1092,8 +1117,14 @@ function ExtraForm({ sims, monthIdx, expenses = [], onAdd }) {
 
   const changeCat = (id) => {
     setCat(id);
-    const first = DEPCATS.find((c) => c.id === id)?.subs[0]?.id ?? "";
-    setSub(first);
+    const first = DEPCATS.find((c) => c.id === id)?.subs[0];
+    setSub(first?.id ?? "");
+    setInc(!!first?.incompressible);
+  };
+
+  const changeSub = (id) => {
+    setSub(id);
+    setInc(!!subs.find((s) => s.id === id)?.incompressible);
   };
 
   const target = sims[Math.min(simIdx, 11)];
@@ -1155,13 +1186,13 @@ function ExtraForm({ sims, monthIdx, expenses = [], onAdd }) {
             </select>
           </Field>
           <Field label="Sous-catégorie">
-            <select className={inputCls} value={sub} onChange={(e) => setSub(e.target.value)} disabled={subs.length === 0}>
+            <select className={inputCls} value={sub} onChange={(e) => changeSub(e.target.value)} disabled={subs.length === 0}>
               {subs.length === 0 && <option value="">—</option>}
               {subs.map((s) => {
                 const rec = recBySub.get(cat + "|" + s.id);
                 return (
                   <option key={s.id} value={s.id}>
-                    {s.label + (rec ? " · récurrente" : "") + (rec?.inc ? " 🔒" : "")}
+                    {s.label + (rec ? " · récurrente" : "") + (s.incompressible || rec?.inc ? " 🔒" : "") + (s.recurring ? " 🔁" : "")}
                   </option>
                 );
               })}
@@ -1181,8 +1212,8 @@ function ExtraForm({ sims, monthIdx, expenses = [], onAdd }) {
   );
 }
 
-function IncomeForm({ sims, monthIdx, onAdd }) {
-  const ROPTS = useMemo(() => revenuOptions(), []);
+function IncomeForm({ sims, monthIdx, onAdd, taxo = TAXONOMIE }) {
+  const ROPTS = useMemo(() => revenuOptions(taxo), [taxo]);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState(0);
   const [mode, setMode] = useState("salaire");
@@ -1299,5 +1330,243 @@ function IncomeForm({ sims, monthIdx, onAdd }) {
         </button>
       </div>
     </Card>
+  );
+}
+
+/* ============================== Console d'administration ============================== */
+
+/**
+ * Nomenclature bancaire : liste des couples catégorie / sous-catégorie,
+ * indicateurs « récurrente 🔁 » / « incompressible 🔒 » modifiables en un
+ * clic, et ajout d'un couple (sous-catégorie dans une catégorie existante
+ * ou nouvelle catégorie). La nomenclature est persistée dans l'état
+ * (state.taxonomie) et utilisée par les formulaires, l'import CSV et les
+ * totaux du mois.
+ */
+function AdminPanel({ state, setState }) {
+  const taxo = state.taxonomie ?? TAXONOMIE;
+
+  // Nombre de dépenses récurrentes utilisant chaque couple cat|sub
+  const useBySub = useMemo(() => {
+    const m = new Map();
+    for (const e of state.expenses ?? []) {
+      const k = (e.cat ?? "") + "|" + (e.sub ?? "");
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  }, [state.expenses]);
+
+  const [mode, setMode] = useState("existante"); // "existante" | "nouvelle"
+  const [catId, setCatId] = useState(taxo[0]?.id ?? "");
+  const [catLabel, setCatLabel] = useState("");
+  const [catNature, setCatNature] = useState("depense");
+  const [catEnv, setCatEnv] = useState("domestiques");
+  const [subLabel, setSubLabel] = useState("");
+  const [subNat, setSubNat] = useState("auto"); // auto | depense | revenu
+  const [recurring, setRecurring] = useState(false);
+  const [incompressible, setIncompressible] = useState(false);
+  const [err, setErr] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+
+  const toggleFlag = (cid, sub, flag) =>
+    setState((s) => ({
+      ...s,
+      taxonomie: setSubFlags(s.taxonomie ?? taxo, cid, sub.id, {
+        recurring: flag === "recurring" ? !sub.recurring : !!sub.recurring,
+        incompressible: flag === "incompressible" ? !sub.incompressible : !!sub.incompressible,
+      }),
+    }));
+
+  const submit = () => {
+    setErr("");
+    setOkMsg("");
+    try {
+      let next = state.taxonomie ?? taxo;
+      let targetCat = catId;
+      let msgCat = "";
+      if (mode === "nouvelle") {
+        next = addCategory(next, { label: catLabel, nature: catNature, env: catEnv });
+        targetCat = next[next.length - 1].id;
+        setCatId(targetCat);
+        msgCat = catLabel.trim() + " · ";
+      }
+      next = addSubcategory(next, targetCat, {
+        label: subLabel,
+        recurring,
+        incompressible,
+        nature: subNat === "auto" ? undefined : subNat,
+      });
+      setState((s) => ({ ...s, taxonomie: next }));
+      setOkMsg("✅ " + msgCat + subLabel.trim() + " ajouté à la nomenclature");
+      setCatLabel("");
+      setSubLabel("");
+      setRecurring(false);
+      setIncompressible(false);
+      setSubNat("auto");
+      setMode("existante");
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-3">
+      <div className="space-y-6 lg:col-span-2">
+        <Card>
+          <h2 className="mb-1 font-semibold">Nomenclature — catégories et sous-catégories</h2>
+          <p className="mb-4 text-xs text-slate-500">
+            Cliquez sur 🔁 ou 🔒 pour marquer une sous-catégorie récurrente ou incompressible.
+            Une sous-catégorie incompressible rend toutes ses dépenses incompressibles dans les
+            totaux du mois et coche automatiquement « incompressible » dans les formulaires.
+          </p>
+          <div className="space-y-3">
+            {taxo.map((c) => {
+              const env = ENVELOPPES.find((x) => x.id === c.env);
+              return (
+                <div key={c.id} className="overflow-hidden rounded-lg border border-slate-200">
+                  <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
+                    <span className="text-sm font-semibold">{c.label}</span>
+                    <Badge color={c.nature === "revenu" ? "#10b981" : "#64748b"}>
+                      {c.nature === "revenu" ? "revenu" : "dépense"}
+                    </Badge>
+                    {env && <Badge color={env.color}>{env.label}</Badge>}
+                    <span className="text-xs text-slate-400">{c.subs.length} sous-catégorie(s)</span>
+                  </div>
+                  {c.subs.length > 0 && (
+                    <div className="divide-y divide-slate-100">
+                      {c.subs.map((s) => {
+                        const used = useBySub.get(c.id + "|" + s.id) ?? 0;
+                        return (
+                          <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                              <span className="text-sm">{s.label}</span>
+                              {subNature(c, s) === "revenu" && c.nature === "depense" && (
+                                <Badge color="#10b981">revenu</Badge>
+                              )}
+                              {used > 0 && (
+                                <span className="text-xs text-slate-400">
+                                  {used} dépense(s) récurrente(s)
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex gap-1">
+                              <button
+                                title="Marquer comme récurrente"
+                                onClick={() => toggleFlag(c.id, s, "recurring")}
+                                className={
+                                  "rounded-md px-2 py-1 text-xs font-medium transition " +
+                                  (s.recurring
+                                    ? "bg-indigo-600 text-white"
+                                    : "bg-slate-100 text-slate-400 hover:bg-slate-200")
+                                }
+                              >
+                                🔁 récurrente
+                              </button>
+                              <button
+                                title="Marquer comme incompressible"
+                                onClick={() => toggleFlag(c.id, s, "incompressible")}
+                                className={
+                                  "rounded-md px-2 py-1 text-xs font-medium transition " +
+                                  (s.incompressible
+                                    ? "bg-rose-600 text-white"
+                                    : "bg-slate-100 text-slate-400 hover:bg-slate-200")
+                                }
+                              >
+                                🔒 incompressible
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      </div>
+
+      <div className="space-y-6">
+        <Card>
+          <h2 className="mb-1 font-semibold">Ajouter un couple (catégorie · sous-catégorie)</h2>
+          <p className="mb-3 text-xs text-slate-500">
+            La nouvelle sous-catégorie est immédiatement disponible dans les formulaires et
+            l'import CSV.
+          </p>
+          <div className="space-y-3">
+            <Field label="Catégorie">
+              <select className={inputCls} value={mode} onChange={(e) => setMode(e.target.value)}>
+                <option value="existante">Catégorie existante…</option>
+                <option value="nouvelle">➕ Nouvelle catégorie</option>
+              </select>
+            </Field>
+            {mode === "existante" ? (
+              <Field label="Choisir la catégorie">
+                <select className={inputCls} value={catId} onChange={(e) => setCatId(e.target.value)}>
+                  {taxo.map((c) => (
+                    <option key={c.id} value={c.id}>{c.label}</option>
+                  ))}
+                </select>
+              </Field>
+            ) : (
+              <>
+                <Field label="Libellé de la catégorie">
+                  <input
+                    className={inputCls}
+                    value={catLabel}
+                    onChange={(e) => setCatLabel(e.target.value)}
+                    placeholder="Ex. Assurance vie"
+                  />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Nature">
+                    <select className={inputCls} value={catNature} onChange={(e) => setCatNature(e.target.value)}>
+                      <option value="depense">Dépense</option>
+                      <option value="revenu">Revenu</option>
+                    </select>
+                  </Field>
+                  {catNature === "depense" && (
+                    <Field label="Enveloppe budgétaire">
+                      <select className={inputCls} value={catEnv} onChange={(e) => setCatEnv(e.target.value)}>
+                        {ENVELOPPES.filter((x) => x.id !== "exceptionnelles").map((x) => (
+                          <option key={x.id} value={x.id}>{x.label}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  )}
+                </div>
+              </>
+            )}
+            <Field label="Libellé de la sous-catégorie">
+              <input
+                className={inputCls}
+                value={subLabel}
+                onChange={(e) => setSubLabel(e.target.value)}
+                placeholder="Ex. Cotisation annuelle"
+              />
+            </Field>
+            <Field label="Nature de la sous-catégorie">
+              <select className={inputCls} value={subNat} onChange={(e) => setSubNat(e.target.value)}>
+                <option value="auto">Comme la catégorie</option>
+                <option value="depense">Dépense</option>
+                <option value="revenu">Revenu</option>
+              </select>
+            </Field>
+            <CheckRow checked={recurring} onChange={setRecurring} label="Sous-catégorie récurrente 🔁" />
+            <CheckRow checked={incompressible} onChange={setIncompressible} label="Sous-catégorie incompressible 🔒" />
+            {err && <p className="text-xs text-rose-600">{err}</p>}
+            {okMsg && <p className="text-xs text-emerald-600">{okMsg}</p>}
+            <button
+              className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
+              onClick={submit}
+              disabled={!subLabel.trim() || (mode === "nouvelle" ? !catLabel.trim() : !catId)}
+            >
+              Ajouter le couple
+            </button>
+          </div>
+        </Card>
+      </div>
+    </div>
   );
 }

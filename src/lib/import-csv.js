@@ -28,7 +28,7 @@
  * Module sans dépendance React : testable isolément (voir import-csv.test.js).
  */
 
-import { catByLabel, subByLabel, subByOperation, taxCat, taxSub } from "./taxonomie.js";
+import { TAXONOMIE, catByLabel, subByLabel, subByOperation, taxCat, taxSub } from "./taxonomie.js";
 
 /* ------------------------------------------------------------------ */
 /* Analyse CSV                                                          */
@@ -85,7 +85,13 @@ export function parseFrAmount(s) {
  *            ignored: number, categoriesInconnues: string[]}}
  * @throws si l'en-tête ne contient pas les colonnes attendues.
  */
-export function parseCsv(text) {
+/**
+ * Analyse un relevé bancaire CSV. `taxo` (optionnel) est la nomenclature
+ * utilisée pour la reconnaissance des catégories/sous-catégories — par
+ * défaut la nomenclature de référence, sinon celle de l'état (console
+ * d'administration) passée par l'appelant.
+ */
+export function parseCsv(text, taxo = TAXONOMIE) {
   const src = String(text ?? "")
     .replace(/^\uFEFF/, "")
     .replace(/\r\n?/g, "\n");
@@ -121,13 +127,13 @@ export function parseCsv(text) {
     const amount = parseFrAmount(cells[iAmount]);
     const catLabel = cells[iCat] ?? "";
     const subLabel = iSub >= 0 ? cells[iSub] ?? "" : "";
-    const cat = catByLabel(catLabel);
+    const cat = catByLabel(catLabel, taxo);
     // Libellé de l'opération : aide à déterminer la sous-catégorie quand la
     // colonne Sous-Catégorie est inconnue (recherche par inclusion).
     const opLabel = iLabel >= 0 ? cells[iLabel] ?? "" : "";
     const sub = cat
-      ? (subByLabel(cat.id, subLabel) ??
-        (opLabel !== "" ? subByOperation(cat.id, opLabel) : undefined))
+      ? (subByLabel(cat.id, subLabel, taxo) ??
+        (opLabel !== "" ? subByOperation(cat.id, opLabel, taxo) : undefined))
       : undefined;
 
     if (!date || amount === undefined || amount === 0 || !cat) {

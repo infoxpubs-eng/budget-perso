@@ -12,6 +12,19 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.11.0] — 2026-10-03
+
+### Ajouté
+
+- **Console d'administration de la nomenclature** (onglet « 🛠️ Admin »)
+  - Liste de toutes les catégories et sous-catégories avec nature (dépense/revenu) et enveloppe budgétaire, et le nombre de dépenses récurrentes qui les utilisent
+  - Indicateurs par sous-catégorie : **récurrente 🔁** et/ou **incompressible 🔒**, modifiables en un clic
+    - une sous-catégorie incompressible rend toutes ses dépenses incompressibles dans les totaux du mois (KPI, répartition incompressible/discrétionnaire, marqueur 🔒 des opérations) et coche automatiquement « incompressible » dans les formulaires de dépense
+    - les indicateurs apparaissent aussi dans les sélecteurs de sous-catégorie des formulaires
+  - **Ajout d'un couple** catégorie · sous-catégorie : sous une catégorie existante ou dans une nouvelle catégorie (nature, enveloppe, nature de sous-catégorie redéfinissable — ex. remboursement)
+- La nomenclature devient **dynamique et persistée** (`state.taxonomie`) : toutes les fonctions de recherche (`taxCat`, `taxSub`, `labelOf`, `envelopeOf`, `depenseCats`, `revenuOptions`, `catByLabel`, `subByLabel`, `subByOperation`, `parseCsv`) acceptent une nomenclature explicite, par défaut celle de référence ; `migrateState` la fournit et la normalise
+- Nouvelles fonctions dans `taxonomie.js` : `defaultTaxonomie`, `slugify`, `addCategory`, `addSubcategory`, `setSubFlags`, `subIncompressible`
+
 ## [0.10.1] — 2026-10-03
 
 ### Corrigé
