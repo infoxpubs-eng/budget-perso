@@ -12,6 +12,15 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.9.0] — 2026-10-03
+
+### Ajouté
+
+- **Indicateur « Solde actuel »** dans l'Aperçu, entre « Dépenses du mois » et « Solde fin de mois » : solde du mois affiché à la date d'aujourd'hui (jour clampé au nombre de jours du mois)
+  - Mois en cours : c'est le solde prévisionnel « aujourd'hui » (indice `aujourd'hui`)
+  - Autre mois : projection à pareille date du mois affiché (indice `au {jour} {mois}`)
+  - Passé en rouge si négatif, comme le solde de fin de mois
+
 ## [0.8.0] — 2026-10-03
 
 ### Ajouté

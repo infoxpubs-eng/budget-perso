@@ -254,6 +254,13 @@ export default function App() {
   // proposent que la fenêtre) ; 0 si le mois affiché est hors fenêtre.
   const simIdx = Math.max(0, sims.findIndex((s) => s.y === sim.y && s.m === sim.m));
 
+  // Solde « actuel » : solde du mois affiché à la date d'aujourd'hui
+  // (jour clampé au nombre de jours du mois ; projection pour un mois
+  // autre que le mois en cours).
+  const todayDay = Math.min(now.getDate(), sim.daily.length - 1);
+  const soldeActuel = sim.daily[todayDay].solde;
+  const isCurrentMonth = sim.y === now.getFullYear() && sim.m === now.getMonth();
+
   const setSolde = (n) => setState((s) => ({ ...s, soldeDepart: n }));
 
   const addExpense = (e) => setState((s) => ({ ...s, expenses: [...s.expenses, e] }));
@@ -474,10 +481,16 @@ export default function App() {
         {/* ------------------------------ APERÇU ------------------------------ */}
         {tab === "apercu" && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
               <Kpi label="Solde en début de mois" value={fmt(sim.start)} />
               <Kpi label="Revenus du mois" value={"+ " + fmt(sim.totalIn)} tone="good" />
               <Kpi label="Dépenses du mois" value={"− " + fmt(sim.totalOut)} tone="bad" />
+              <Kpi
+                label="Solde actuel"
+                value={fmt(soldeActuel)}
+                tone={soldeActuel >= 0 ? "accent" : "bad"}
+                hint={isCurrentMonth ? "aujourd'hui" : "au " + now.getDate() + " " + MONTHS[sim.m].toLowerCase()}
+              />
               <Kpi
                 label="Solde fin de mois"
                 value={fmt(sim.end)}

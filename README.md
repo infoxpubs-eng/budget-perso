@@ -18,6 +18,7 @@ Application React de gestion de budget personnel qui répond à une question sim
   - ou type **« salaire »**, versé **l'avant-veille du dernier jour ouvré du mois** (calcul automatique, week-ends franchis)
   - option **13ᵉ mois en 2 fois** : ½ versée avec le salaire de juin, ½ avec celui de novembre
   - option **bonus estimé**, versé avec le salaire de mars
+- **Aperçu du mois** : solde en début de mois, revenus, dépenses, **solde actuel** (à la date d'aujourd'hui) et solde prévisionnel de fin de mois
 - **Graphique d'évolution du solde** : courbe quotidienne du mois, survolable opération par opération
 - **Flux quotidien** : barres vertes (entrées) / rouges (sorties) par jour du mois
 - **Projection 12 mois** : solde prévisionnel de fin de mois avec report d'un mois sur l'autre
