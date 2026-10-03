@@ -259,3 +259,51 @@ describe("matchesPlannedExpense / matchesPlannedIncome", () => {
     expect(matchesPlannedIncome({ ...r, amount: 180, y: 2026, m: 9 }, uniq)).toBe(false);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Colonne « Libellé opération » (v0.6.0)                              */
+/* ------------------------------------------------------------------ */
+
+describe("colonne « Libellé opération »", () => {
+  /* Format détaillé : la colonne « Libellé opération » est en 3e position. */
+  const DETAILLE =
+    "Date transaction;Date comptabilisation;Libellé opération;Catégorie;Sous-Catégorie;Montant;Pointée;\r\n" +
+    "30/09/2026;30/09/2026;PRELEVEMENT EUROPEEN DE: FREE MOBILE MANDAT FM-56688208-1;Abonnements et téléphonie;Téléphonie (fixe et mobile);-22,67;Non;\r\n" +
+    "30/09/2026;30/09/2026;FRAIS PAIEMENT HORS ZONE EURO CARTE X0048 20/03 19,95 USD PAYS-BAS;Services financiers / professionnels;Frais bancaires et de gestion (dont agios);-1,35;Non;\r\n";
+
+  it("utilise le libellé de l'opération comme intitulé de la ligne", () => {
+    const { rows, ignored } = parseCsv(DETAILLE);
+    expect(ignored).toBe(0);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].label).toBe("PRELEVEMENT EUROPEEN DE: FREE MOBILE MANDAT FM-56688208-1");
+    expect(rows[1].label).toBe("FRAIS PAIEMENT HORS ZONE EURO CARTE X0048 20/03 19,95 USD PAYS-BAS");
+    // Le rapprochement catégorie / sous-catégorie reste inchangé.
+    expect(rows[0].cat).toBe("abonnements");
+    expect(rows[0].sub).toBe("telephonie");
+    expect(rows[1].cat).toBe("services-financiers");
+    expect(rows[1].sub).toBe("frais-bancaires");
+  });
+
+  it("retombe sur le libellé de la sous-catégorie quand la colonne est absente", () => {
+    const { rows } = parseCsv(SAMPLE);
+    expect(rows[0].label).toBe("Téléphonie (fixe et mobile)");
+  });
+
+  it("retombe sur le libellé de la sous-catégorie quand le libellé est vide", () => {
+    const csv = DETAILLE.replace(
+      "PRELEVEMENT EUROPEEN DE: FREE MOBILE MANDAT FM-56688208-1",
+      ""
+    );
+    const { rows } = parseCsv(csv);
+    expect(rows[0].label).toBe("Téléphonie (fixe et mobile)");
+  });
+
+  it("propage le libellé de l'opération jusqu'aux écritures importées", () => {
+    const { rows } = parseCsv(DETAILLE);
+    const { extras, depensesTotal } = rowsToEntries(rows);
+    expect(extras).toHaveLength(2);
+    expect(extras[0].label).toBe("PRELEVEMENT EUROPEEN DE: FREE MOBILE MANDAT FM-56688208-1");
+    expect(extras[0].amount).toBeCloseTo(22.67);
+    expect(depensesTotal).toBeCloseTo(24.02);
+  });
+});

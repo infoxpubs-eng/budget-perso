@@ -12,6 +12,16 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.6.0] — 2026-10-03
+
+### Ajouté
+
+- **Colonne « Libellé opération » supportée à l'import CSV** : les exports détaillés du type `Date transaction;Date comptabilisation;Libellé opération;Catégorie;Sous-Catégorie;Montant;Pointée;` sont reconnus
+  - Le libellé réel de l'opération (ex. « PRELEVEMENT EUROPEEN DE: FREE MOBILE… ») devient l'intitulé de l'écriture importée — plus parlant que le libellé de la sous-catégorie
+  - Comportement inchangé pour les exports sans cette colonne, ou quand le libellé est vide : repli sur le libellé de la sous-catégorie (ou de la catégorie)
+  - Détection tolérante : toute colonne d'en-tête contenant « libell… » est utilisée
+- 4 nouveaux tests (70 au total) : lecture du format détaillé, repli sans colonne / libellé vide, propagation du libellé jusqu'aux écritures
+
 ## [0.5.0] — 2026-10-01
 
 ### Ajouté

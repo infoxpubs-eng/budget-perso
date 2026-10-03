@@ -3,11 +3,16 @@
  *
  * Format attendu (export « Guadeloupe / GDB », séparateur « ; ») :
  *   Date transaction;Date comptabilisation;Catégorie;Sous-Catégorie;Montant;Pointée;
+ * ou, avec la colonne optionnelle « Libellé opération » (export détaillé) :
+ *   Date transaction;Date comptabilisation;Libellé opération;Catégorie;Sous-Catégorie;Montant;Pointée;
  *
  * - Montant au format français (« -22,67 ») : négatif = dépense, positif = revenu.
  * - Catégorie / Sous-Catégorie rapprochées de la nomenclature bancaire
  *   (taxonomie.js) de façon tolérante : accents, casse, «…» et parenthèses
  *   ignorés ; une sous-catégorie inconnue reste importée sans sous-catégorie.
+ * - Colonne « Libellé opération » (optionnelle) : son contenu devient
+ *   l'intitulé de l'écriture importée (sinon, libellé de la sous-catégorie
+ *   ou de la catégorie).
  * - Les lignes dont la catégorie est inconnue (ou la date / le montant
  *   illisibles) sont ignorées et comptées.
  * - Les lignes correspondant à des écritures déjà planifiées (dépenses
@@ -96,6 +101,8 @@ export function parseCsv(text) {
   const iCat = col("catégorie") >= 0 ? col("catégorie") : col("categorie");
   const iSub = col("sous-catégorie") >= 0 ? col("sous-catégorie") : col("sous-categorie");
   const iAmount = col("montant");
+  // Colonne « Libellé opération » (optionnelle) : intitulé réel de l'écriture.
+  const iLabel = header.findIndex((h) => h.includes("libell"));
   if (iDate < 0 || iCat < 0 || iAmount < 0) {
     throw new Error(
       "colonnes attendues introuvables (il faut au moins : date, catégorie, montant)"
@@ -114,6 +121,8 @@ export function parseCsv(text) {
     const subLabel = iSub >= 0 ? cells[iSub] ?? "" : "";
     const cat = catByLabel(catLabel);
     const sub = cat ? subByLabel(cat.id, subLabel) : undefined;
+    // Libellé de l'opération : prioritaire s'il est présent et non vide.
+    const opLabel = iLabel >= 0 ? cells[iLabel] ?? "" : "";
 
     if (!date || amount === undefined || amount === 0 || !cat) {
       ignored++;
@@ -128,7 +137,7 @@ export function parseCsv(text) {
       amount,
       cat: cat.id,
       sub: sub ? sub.id : undefined,
-      label: sub ? sub.label : cat.label,
+      label: opLabel !== "" ? opLabel : sub ? sub.label : cat.label,
     });
   }
 
