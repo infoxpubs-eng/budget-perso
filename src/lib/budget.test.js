@@ -210,6 +210,18 @@ describe("migrateState", () => {
     const s = migrateState({ incomes: [{ id: "x", label: "Salaire", amount: 2000 }] });
     expect(s.incomes[0].mode).toBe("salaire");
   });
+
+  it("fournit les réglages du modèle prédictif par défaut (v0.22)", () => {
+    const s = migrateState(null);
+    expect(s.estimation).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane" });
+  });
+
+  it("fusionne les réglages utilisateur du modèle et borne les valeurs", () => {
+    const s = migrateState({ estimation: { window: 3, presenceMin: 0.8, stat: "moyenne" } });
+    expect(s.estimation).toEqual({ window: 3, presenceMin: 0.8, stat: "moyenne" });
+    const s2 = migrateState({ estimation: { window: 99, presenceMin: 2, stat: "inconnu" } });
+    expect(s2.estimation).toEqual({ window: 24, presenceMin: 1, stat: "mediane" });
+  });
 });
 
 /* ------------------------------------------------------------------ */

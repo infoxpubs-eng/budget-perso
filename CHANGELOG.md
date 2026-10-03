@@ -12,7 +12,12 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
-## [0.21.0] — 2026-10-03
+## [0.22.0] — 2026-10-03
+
+### Ajouté
+
+- **Réglages du modèle prédictif dans la console 🛠️ Admin** : la carte « Modèle prédictif — habitudes non planifiées » expose les trois curseurs de la provision — **fenêtre d'apprentissage** (1 à 24 mois complets, 6 par défaut), **présence minimale** (0 à 100 %, 50 % par défaut) et **statistique de tendance** (médiane, peu sensible aux extrêmes, ou moyenne, qui suit les gros mois). La provision recalculée s'affiche en direct dans la console pour le mois affiché, et les réglages sont persistés avec l'état (`state.estimation`, normalisés par `normEstimation` avec bornes sûres au chargement) : ils survivent à un rechargement et s'appliquent au KPI « Solde fin de mois probable » comme à la carte « Habitudes non planifiées » de l'onglet Échéancier.
+
 
 ### Ajouté
 

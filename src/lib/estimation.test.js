@@ -4,6 +4,9 @@ import {
   monthlySpendByCouple,
   coupleTendencies,
   remainingProvision,
+  normEstimation,
+  meanOf,
+  DEFAULT_ESTIMATION,
   TENDENCY_WINDOW,
   PRESENCE_MIN,
 } from "./estimation.js";
@@ -171,5 +174,95 @@ describe("remainingProvision", () => {
   it("paramètres du modèle exposés et cohérents", () => {
     expect(TENDENCY_WINDOW).toBe(6);
     expect(PRESENCE_MIN).toBe(0.5);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Réglages du modèle (v0.22 : fenêtre, seuil, statistique)             */
+/* ------------------------------------------------------------------ */
+
+/* Mêmes 6 mois complets, dernier mois lourd : distingue médiane/moyenne. */
+const sixVar = [
+  x(2026, 3, 5, 100), x(2026, 4, 5, 200), x(2026, 5, 5, 300),
+  x(2026, 6, 5, 400), x(2026, 7, 5, 500), x(2026, 8, 5, 1200),
+];
+
+describe("normEstimation", () => {
+  it("réglages par défaut", () => {
+    expect(normEstimation()).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane" });
+    expect(DEFAULT_ESTIMATION).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane" });
+  });
+
+  it("bornes sûres : fenêtre 1–24, présence 0–1, statistique énumérée", () => {
+    expect(normEstimation({ window: 99 })).toEqual({ window: 24, presenceMin: 0.5, stat: "mediane" });
+    expect(normEstimation({ window: 2.7 })).toEqual({ window: 3, presenceMin: 0.5, stat: "mediane" });
+    expect(normEstimation({ window: 0 })).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane" });
+    expect(normEstimation({ presenceMin: 1.5 })).toEqual({ window: 6, presenceMin: 1, stat: "mediane" });
+    expect(normEstimation({ presenceMin: -1 })).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane" });
+    expect(normEstimation({ stat: "n'importe" })).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane" });
+    expect(normEstimation({ stat: "moyenne" })).toEqual({ window: 6, presenceMin: 0.5, stat: "moyenne" });
+  });
+});
+
+describe("réglages — statistique de tendance", () => {
+  it("moyenne : suit les gros mois (450) là où la médiane résiste (350)", () => {
+    const med = coupleTendencies(sixVar, { y: 2026, m: 9 });
+    const moy = coupleTendencies(sixVar, { y: 2026, m: 9 }, { stat: "moyenne" });
+    expect(med[0].tendency).toBe(350);
+    expect(moy[0].tendency).toBe(450);
+  });
+
+  it("meanOf : moyenne simple, 0 si vide", () => {
+    expect(meanOf([1, 2, 3])).toBe(2);
+    expect(meanOf([400, 500, 1200])).toBe(700);
+    expect(meanOf([])).toBe(0);
+  });
+});
+
+describe("réglages — fenêtre d'apprentissage", () => {
+  it("fenêtre réduite à 3 mois : seuls les 3 derniers mois complets comptent", () => {
+    // Fenêtre = juin–août : [400, 500, 1200] → médiane 500, moyenne 700.
+    const tend = coupleTendencies(sixVar, { y: 2026, m: 9 }, { window: 3 });
+    expect(tend[0].windowMonths).toBe(3);
+    expect(tend[0].tendency).toBe(500);
+    const tendMoy = coupleTendencies(sixVar, { y: 2026, m: 9 }, { window: 3, stat: "moyenne" });
+    expect(tendMoy[0].tendency).toBe(700);
+  });
+});
+
+describe("réglages — seuil de présence", () => {
+  it("seuil abaissé : une habitude peu fréquente devient provisionnable en moyenne", () => {
+    // Taxis vus une fois sur 6 mois (fenêtre portée par les restaurants).
+    const data = [...sixVar, x(2026, 8, 5, 300, "voyages-transports", "taxis")];
+    const defaut = coupleTendencies(data, { y: 2026, m: 9 });
+    const taxisDefaut = defaut.find((t) => t.sub === "taxis");
+    expect(taxisDefaut.presence).toBe(1);
+    expect(taxisDefaut.tendency).toBe(0); // médiane à zéros inclus : 0 de toute façon
+    const ouvert = coupleTendencies(data, { y: 2026, m: 9 }, { presenceMin: 0.1, stat: "moyenne" });
+    expect(ouvert.find((t) => t.sub === "taxis").tendency).toBe(50); // 300 / 6
+  });
+
+  it("seuil relevé à 80 % : une habitude présente 4 mois sur 6 n'est plus provisionnée", () => {
+    // Restaurants avril–juillet (4 mois) ; taxis chaque mois avril–septembre (étend la fenêtre à 6 mois).
+    const taxis = [3, 4, 5, 6, 7, 8].map((m) => x(2026, m, 5, 10, "voyages-transports", "taxis"));
+    const resto4 = sixVar.slice(0, 4);
+    const tend = coupleTendencies([...resto4, ...taxis], { y: 2026, m: 9 }, { presenceMin: 0.8 });
+    const resto = tend.find((t) => t.sub === "restaurants");
+    expect(resto.presence).toBe(4);
+    expect(resto.windowMonths).toBe(6);
+    expect(resto.tendency).toBe(0);
+  });
+});
+
+describe("remainingProvision — réglages", () => {
+  it("les réglages se propagent à la provision restante", () => {
+    const defaut = remainingProvision({ extras: sixVar, expenses: [], y: 2026, m: 9 });
+    expect(defaut.total).toBe(350);
+    const w3 = remainingProvision({ extras: sixVar, expenses: [], y: 2026, m: 9, settings: { window: 3 } });
+    expect(w3.total).toBe(500);
+    const w3moy = remainingProvision({
+      extras: sixVar, expenses: [], y: 2026, m: 9, settings: { window: 3, stat: "moyenne" },
+    });
+    expect(w3moy.total).toBe(700);
   });
 });

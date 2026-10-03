@@ -51,7 +51,7 @@ import {
   setSubActive,
 } from "./lib/taxonomie.js";
 import { parseCsv, rowsToEntries, applyTaxoAdditions, mergeHistory, mergeAddedLines, A_CLASSER } from "./lib/import-csv.js";
-import { remainingProvision, TENDENCY_WINDOW, PRESENCE_MIN } from "./lib/estimation.js";
+import { remainingProvision, DEFAULT_ESTIMATION } from "./lib/estimation.js";
 
 /* ============================== Données initiales ============================== */
 
@@ -488,9 +488,12 @@ export default function App() {
   const recTotals = useMemo(() => recurringMonthTotals(state, sim.y, sim.m), [state, sim]);
   // Provision « habitudes non planifiées » du mois affiché : tendances des
   // couples sans écriture planifiée, moins ce qui est déjà dépensé.
+  // Réglages du modèle (fenêtre, seuil de présence, statistique) : persistés
+  // avec l'état, éditables dans la console 🛠️ Admin.
+  const est = state.estimation ?? DEFAULT_ESTIMATION;
   const prov = useMemo(
-    () => remainingProvision({ extras: state.extras, expenses: state.expenses, y: sim.y, m: sim.m }),
-    [state.extras, state.expenses, sim.y, sim.m]
+    () => remainingProvision({ extras: state.extras, expenses: state.expenses, y: sim.y, m: sim.m, settings: est }),
+    [state.extras, state.expenses, state.estimation, sim.y, sim.m]
   );
   const recYear = useMemo(
     () => sims.map((s) => ({ label: s.label, min: s.min, minDay: s.minDay, end: s.end, ...recurringMonthTotals(state, s.y, s.m) })),
@@ -1097,11 +1100,11 @@ export default function App() {
               </div>
               <p className="mb-3 text-xs text-slate-500">
                 Tendance par couple sans écriture planifiée, apprise des relevés importés :
-                médiane des mois observés sur une fenêtre de {TENDENCY_WINDOW} mois complets
+                {est.stat === "moyenne" ? "moyenne" : "médiane"} des mois observés sur une fenêtre de {est.window} mois complets
                 (zéros inclus), provisionnée si le couple est présent dans au moins
-                {Math.round(PRESENCE_MIN * 100)} % des mois — les dépenses exceptionnelles
+                {Math.round(est.presenceMin * 100)} % des mois — les dépenses exceptionnelles
                 n'influencent pas la prévision. Restant = tendance − déjà dépensé ce mois-ci
-                (les couples planifiés sont exclus : pas de double comptage).
+                (les couples planifiés sont exclus : pas de double comptage). Réglages dans 🛠️ Admin.
                 {isCurrentMonth && prov.total > 0 && (
                   <> À lisser sur les {daysInMonth(sim.y, sim.m) - now.getDate()} jour(s) restant(s), réactualisé à chaque import.</>
                 )}
@@ -1212,7 +1215,7 @@ export default function App() {
         )}
 
         {/* ------------------------------ ADMIN ------------------------------ */}
-        {tab === "admin" && <AdminPanel state={state} setState={setState} />}
+        {tab === "admin" && <AdminPanel state={state} setState={setState} prov={prov} simLabel={sim.label} />}
 
         {/* ----------------------- DIALOGUE IMPORT CSV ----------------------- */}
         {csvImport && (
@@ -1741,7 +1744,7 @@ function IncomeForm({ sims, monthIdx, onAdd, taxo = TAXONOMIE }) {
  * (state.taxonomie) et utilisée par les formulaires, l'import CSV et les
  * totaux du mois.
  */
-function AdminPanel({ state, setState }) {
+function AdminPanel({ state, setState, prov, simLabel }) {
   const taxo = state.taxonomie ?? TAXONOMIE;
 
   // Nombre de dépenses récurrentes utilisant chaque couple cat|sub
@@ -1852,9 +1855,53 @@ function AdminPanel({ state, setState }) {
     }
   };
 
+  const est = state.estimation ?? DEFAULT_ESTIMATION;
+  const setEst = (key, value) =>
+    setState((s) => ({ ...s, estimation: { ...(s.estimation ?? DEFAULT_ESTIMATION), [key]: value } }));
+
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
+        <Card>
+          <h2 className="mb-1 font-semibold">Modèle prédictif — habitudes non planifiées</h2>
+          <p className="mb-4 text-xs text-slate-500">
+            Réglages de la provision qui retranche le KPI « Solde fin de mois probable » (onglet
+            Aperçu) : fenêtre d'apprentissage (mois complets, zéros inclus), présence minimale
+            (fraction des mois de la fenêtre — en dessous de la moitié, une médiane à zéros
+            inclus est déjà nulle : le seuil ne mord alors pas), statistique de tendance
+            (la médiane ignore les extrêmes, la moyenne suit les gros mois). Sans relevé
+            importé, la provision est nulle ; les réglages sont persistés avec l'état.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Fenêtre (mois)">
+              <div title="Fenêtre d'apprentissage (1 à 24 mois complets)">
+                <NumInput value={est.window} onChange={(v) => setEst("window", Math.max(1, Math.min(24, Math.round(v))))} />
+              </div>
+            </Field>
+            <Field label="Présence minimale (%)">
+              <div title="Présence minimale dans la fenêtre (0 à 100 %)">
+                <NumInput value={Math.round(est.presenceMin * 100)} onChange={(v) => setEst("presenceMin", Math.max(0, Math.min(100, Math.round(v))) / 100)} />
+              </div>
+            </Field>
+            <Field label="Statistique">
+              <select
+                className={inputCls}
+                title="Statistique de tendance"
+                value={est.stat}
+                onChange={(e) => setEst("stat", e.target.value)}
+              >
+                <option value="mediane">Médiane (ignore les extrêmes)</option>
+                <option value="moyenne">Moyenne (suit les gros mois)</option>
+              </select>
+            </Field>
+          </div>
+          <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            Provision « habitudes » de {simLabel ?? "ce mois"} :{" "}
+            <span className="font-semibold text-rose-600">− {fmt(prov?.total ?? 0)}</span>{" "}
+            sur {prov?.lines.length ?? 0} couple(s) — recalculée à chaque réglage.
+          </div>
+        </Card>
+
         <Card>
           <h2 className="mb-1 font-semibold">Nomenclature — catégories et sous-catégories</h2>
           <p className="mb-4 text-xs text-slate-500">

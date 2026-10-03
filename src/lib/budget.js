@@ -24,6 +24,7 @@ import {
   TAXO_FLAGS_VERSION,
   applyDefaultFlags,
 } from "./taxonomie.js";
+import { DEFAULT_ESTIMATION, normEstimation } from "./estimation.js";
 
 /**
  * Correspondance entre les anciennes catégories plates (≤ v0.2.x) et la
@@ -175,6 +176,9 @@ export function migrateState(raw) {
     s.taxonomie = applyDefaultFlags(s.taxonomie);
     s.taxoFlagsVersion = TAXO_FLAGS_VERSION;
   }
+  // Réglages du modèle prédictif (fenêtre, seuil de présence, statistique) :
+  // défauts fusionnés avec les choix de l'utilisateur, bornés.
+  s.estimation = normEstimation({ ...DEFAULT_ESTIMATION, ...(raw?.estimation ?? {}) });
   return s;
 }
 
