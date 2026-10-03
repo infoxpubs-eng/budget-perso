@@ -11,6 +11,7 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
+- Réglages par couple du modèle prédictif (fenêtre / statistique individuelles) — en réserve : voir comment le réglage global évolue déjà à l'usage
 
 ## [0.22.0] — 2026-10-03
 
