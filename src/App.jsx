@@ -327,7 +327,7 @@ export default function App() {
           throw new Error("structure inattendue");
         }
         setState(migrateState(parsed));
-        setMonthIdx(0);
+        setSelKey(null);
       } catch (e) {
         alert("Fichier invalide ou illisible.");
       }
@@ -376,7 +376,7 @@ export default function App() {
     if (window.confirm("Effacer toutes vos données et revenir à l'exemple de démonstration ?")) {
       try { localStorage.removeItem("budget-perso-v2"); } catch (e) {}
       setState(DEFAULT_STATE);
-      setMonthIdx(0);
+      setSelKey(null);
     }
   };
 

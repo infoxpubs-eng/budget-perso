@@ -12,6 +12,12 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.10.1] — 2026-10-03
+
+### Corrigé
+
+- `setMonthIdx` obsolète (renommé `setSelKey` en 0.10.0) encore appelé dans « Importer JSON » et « Réinitialiser » : les deux boutons plantaient avec `ReferenceError: setMonthIdx is not defined` ; ils réinitialisent désormais la sélection de mois (`setSelKey(null)`)
+
 ## [0.10.0] — 2026-10-03
 
 ### Ajouté
