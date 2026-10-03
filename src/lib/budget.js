@@ -300,12 +300,28 @@ export function loadedMonths(state) {
 }
 
 /**
+ * Point d'ancrage de la simulation : le mois chargé le plus ancien s'il
+ * précède le mois de départ par défaut (mois courant) — le solde de départ
+ * s'applique à ce mois-là et l'historique enchaîne les mois jusqu'au mois
+ * courant. Sans mois chargé antérieur, renvoie le mois de départ par défaut.
+ */
+export function simStart(state, defaultY, defaultM) {
+  const loaded = loadedMonths(state);
+  for (const d of loaded) {
+    if (d.y < defaultY || (d.y === defaultY && d.m < defaultM)) return { y: d.y, m: d.m };
+  }
+  return { y: defaultY, m: defaultM };
+}
+
+/**
  * Simulation de 12 mois enchaînés à partir du mois de départ. Chaque mois
  * est produit par monthSim() ; le solde de fin d'un mois ouvre le suivant.
+ * `opening` (facultatif) remplace le solde de départ comme ouverture du
+ * premier mois — utilisé pour enchaîner un historique calculé en amont.
  */
-export function simulate(state, startY, startM) {
+export function simulate(state, startY, startM, opening = state.soldeDepart) {
   const out = [];
-  let carry = state.soldeDepart;
+  let carry = opening;
   for (let k = 0; k < 12; k++) {
     const d = new Date(startY, startM + k, 1);
     const month = monthSim(state, d.getFullYear(), d.getMonth(), carry);

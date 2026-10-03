@@ -13,6 +13,7 @@ import {
   simulate,
   monthSim,
   loadedMonths,
+  simStart,
   monthlyExpenses,
 } from "./budget.js";
 import {
@@ -512,5 +513,50 @@ describe("loadedMonths", () => {
 
   it("retourne une liste vide sans données chargées", () => {
     expect(loadedMonths(baseState())).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* simStart / simulate(…, opening) (v0.10.0)                            */
+/* ------------------------------------------------------------------ */
+
+describe("simStart", () => {
+  it("retourne le mois de départ par défaut sans mois chargé antérieur", () => {
+    expect(simStart(baseState(), 2026, 9)).toEqual({ y: 2026, m: 9 });
+  });
+
+  it("retourne le mois chargé le plus ancien s'il précède le mois courant", () => {
+    const st = baseState();
+    st.extras = [
+      { id: "x1", label: "A", amount: 10, day: 2, y: 2026, m: 8 },
+      { id: "x2", label: "B", amount: 5, day: 3, y: 2026, m: 5 },
+    ];
+    expect(simStart(st, 2026, 9)).toEqual({ y: 2026, m: 5 });
+  });
+
+  it("ignore les mois chargés postérieurs ou égaux au mois courant", () => {
+    const st = baseState();
+    st.extras = [{ id: "x", label: "A", amount: 10, day: 2, y: 2027, m: 0 }];
+    expect(simStart(st, 2026, 9)).toEqual({ y: 2026, m: 9 });
+  });
+});
+
+describe("simulate — solde d'ouverture explicite", () => {
+  it("ouvre le premier mois sur l'ouverture fournie et enchaîne", () => {
+    const sims = simulate(baseState(), 2026, 0, 500);
+    expect(sims[0].start).toBe(500);
+    expect(sims[1].start).toBe(sims[0].end);
+  });
+
+  it("défaut : ouverture sur le solde de départ", () => {
+    expect(simulate(baseState(), 2026, 0)[0].start).toBe(1000);
+  });
+
+  it("enchaîner monthSim à la main donne la même simulation", () => {
+    const sims = simulate(baseState(), 2026, 0, 300);
+    const m0 = monthSim(baseState(), 2026, 0, 300);
+    const m1 = monthSim(baseState(), 2026, 1, m0.end);
+    expect(m1.start).toBe(sims[1].start);
+    expect(m1.end).toBe(sims[1].end);
   });
 });

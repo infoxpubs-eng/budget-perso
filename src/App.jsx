@@ -24,6 +24,7 @@ import {
   simulate,
   monthSim,
   loadedMonths,
+  simStart,
   migrateState,
   monthlyExpenses,
 } from "./lib/budget.js";
@@ -224,24 +225,53 @@ export default function App() {
   }, [state, loaded]);
 
   const start = useMemo(() => ({ y: now.getFullYear(), m: now.getMonth() }), []);
-  const sims = useMemo(() => simulate(state, start.y, start.m), [state, start]);
 
-  // ----- Sélecteur de mois : 12 mois simulés + mois chargés hors fenêtre -----
+  // ----- Ancrage de la simulation sur les mois chargés -----
+  // Le solde de départ s'applique à la date chargée la plus lointaine
+  // (simStart) ; l'historique enchaîne les mois jusqu'au mois courant,
+  // dont le solde d'ouverture devient le solde résultant.
+  const loadedList = useMemo(() => loadedMonths(state), [state]);
+  const anchor = useMemo(() => simStart(state, start.y, start.m), [state, start]);
+
+  const hist = useMemo(() => {
+    const months = [];
+    let carry = state.soldeDepart;
+    let y = anchor.y;
+    let m = anchor.m;
+    while (y < start.y || (y === start.y && m < start.m)) {
+      const month = monthSim(state, y, m, carry);
+      months.push(month);
+      carry = month.end;
+      const d = new Date(y, m + 1, 1);
+      y = d.getFullYear();
+      m = d.getMonth();
+    }
+    return { months, opening: carry };
+  }, [state, anchor, start]);
+
+  const sims = useMemo(() => simulate(state, start.y, start.m, hist.opening), [state, start, hist.opening]);
+
+  // ----- Sélecteur de mois : historique + 12 mois simulés + relevé au-delà -----
   const monthsAll = useMemo(() => {
-    const loaded = loadedMonths(state);
-    const dataKeys = new Set(loaded.map((d) => d.y + "-" + d.m));
-    const inWindow = sims.map((s) => ({
-      ...s,
-      horsFenetre: false,
-      hasData: dataKeys.has(s.y + "-" + s.m),
-    }));
-    // Mois chargés situés hors de la fenêtre de 12 mois (ex. relevé du mois
-    // précédent importé après coup) : affichés seuls, solde d'ouverture = solde de départ.
-    const extra = loaded
-      .filter((d) => !sims.some((s) => s.y === d.y && s.m === d.m))
-      .map((d) => ({ ...monthSim(state, d.y, d.m, state.soldeDepart), horsFenetre: true, hasData: true }));
-    return [...inWindow, ...extra].sort((a, b) => a.y - b.y || a.m - b.m);
-  }, [state, sims]);
+    const dataKeys = new Set(loadedList.map((d) => d.y + "-" + d.m));
+    const mark = (s, flags) => ({ ...s, ...flags, hasData: dataKeys.has(s.y + "-" + s.m) });
+    // Mois chargés postérieurs à la fenêtre : enchaînés depuis sa fin.
+    const lastSim = sims[sims.length - 1];
+    const tail = [];
+    let carry = lastSim.end;
+    for (const d of loadedList) {
+      if (d.y > lastSim.y || (d.y === lastSim.y && d.m > lastSim.m)) {
+        const month = monthSim(state, d.y, d.m, carry);
+        tail.push(month);
+        carry = month.end;
+      }
+    }
+    return [
+      ...hist.months.map((s) => mark(s, { historique: true })),
+      ...sims.map((s) => mark(s, {})),
+      ...tail.map((s) => mark(s, { horsFenetre: true })),
+    ];
+  }, [state, loadedList, hist, sims]);
 
   const options = useMemo(() => {
     const filtered = onlyLoaded ? monthsAll.filter((s) => s.hasData) : monthsAll;
@@ -391,12 +421,17 @@ export default function App() {
             <h1 className="text-2xl font-bold">💰 Budget prévisionnel</h1>
             <p className="text-sm text-slate-500">
               💾 Sauvegarde automatique dans ce navigateur · Mois 1 : {monthLabel(start.y, start.m)}
+              {hist.months.length > 0 && (
+                <> · Solde de départ appliqué à {monthLabel(anchor.y, anchor.m)} (date chargée la plus lointaine)</>
+              )}
             </p>
           </div>
           <div className="flex flex-wrap items-end gap-3">
             <div className="w-40">
               <Field label="Solde de départ (€)">
-                <NumInput value={state.soldeDepart} onChange={setSolde} />
+                <div title={hist.months.length > 0 ? "Solde à la date chargée la plus lointaine (" + monthLabel(anchor.y, anchor.m) + "), avant enchaînement de l'historique" : "Solde en début de mois 1"}>
+                  <NumInput value={state.soldeDepart} onChange={setSolde} />
+                </div>
               </Field>
             </div>
             <button
@@ -414,7 +449,7 @@ export default function App() {
             >
               {options.map((s) => (
                 <option key={s.y + "-" + s.m} value={s.y + "-" + s.m}>
-                  {s.label + (s.hasData ? " 🧾" : "") + (s.horsFenetre ? " (hors fenêtre)" : "")}
+                  {s.label + (s.hasData ? " 🧾" : "") + (s.historique ? " (historique)" : s.horsFenetre ? " (hors fenêtre)" : "")}
                 </option>
               ))}
             </select>
@@ -589,7 +624,8 @@ export default function App() {
               <Card>
                 <h2 className="mb-1 font-semibold">Solde prévisionnel fin de mois (12 mois)</h2>
                 <p className="mb-3 text-xs text-slate-500">
-                  Enchaînement des mois à partir de {monthLabel(start.y, start.m)} avec le solde de départ de {fmt(state.soldeDepart)}.
+                  Enchaînement des mois à partir de {monthLabel(anchor.y, anchor.m)} avec le solde de départ de {fmt(state.soldeDepart)}
+                  {hist.months.length > 0 && <> ; historique enchaîné jusqu'à {monthLabel(start.y, start.m)} (ouverture : {fmt(sims[0].start)})</>}.
                 </p>
                 <div className="h-60">
                   <ResponsiveContainer width="100%" height="100%">

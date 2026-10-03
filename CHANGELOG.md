@@ -12,6 +12,21 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.10.0] — 2026-10-03
+
+### Ajouté
+
+- **Historique enchaîné depuis le relevé importé** : le solde de départ s'applique désormais à la **date chargée la plus lointaine** du relevé (mois chargé le plus ancien) au lieu du début du mois courant
+  - Les mois entre cette date et le mois courant forment un **historique** (annoté « (historique) » dans le sélecteur) : ils enchaînent le solde d'un mois sur l'autre, mois chargés et dépenses récurrentes comprises
+  - Le mois 1 (mois courant) s'ouvre sur le **solde résultant de l'historique** — le champ « Solde de départ » est le solde à la date chargée la plus lointaine (info-bulle et sous-titre explicites)
+  - Les mois chargés au-delà de la fenêtre de 12 mois restent enchaînés depuis la fin de fenêtre
+  - Sans relevé importé : comportement inchangé (solde de départ en début de mois 1)
+- Nouvelle fonction dans `budget.js` : `simStart(state, defaultY, defaultM)` (point d'ancrage de la simulation) ; `simulate(state, startY, startM, opening?)` accepte un solde d'ouverture explicite
+
+### Tests
+
+- 6 nouveaux tests (83 au total) : `simStart` (défaut, mois chargé le plus ancien, mois postérieurs ignorés) et `simulate` avec ouverture explicite (ouverture fournie, défaut, équivalence avec l'enchaînement manuel de `monthSim`)
+
 ## [0.9.0] — 2026-10-03
 
 ### Ajouté
