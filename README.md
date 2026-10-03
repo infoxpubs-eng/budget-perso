@@ -80,6 +80,7 @@ Module **sans dépendance React**, donc testable isolément :
 | `loadedMonths(state)` | Mois « chargés » (dépense exceptionnelle ou revenu unique), triés, sans doublon |
 | `addCategory(taxo, {label, nature, env})` / `addSubcategory(taxo, catId, {label, recurring, incompressible, nature})` / `setSubFlags(taxo, catId, subId, {recurring, incompressible})` | Console d'administration : ajout d'un couple et indicateurs 🔁 / 🔒 (fonctions pures, `taxonomie.js`) |
 | `defaultTaxonomie()` / `slugify(label)` / `subIncompressible(catId, subId, taxo)` | Copie de la nomenclature par défaut, identifiant technique, indicateur incompressible |
+| `TAXO_FLAGS_VERSION` / `applyDefaultFlags(taxo)` | Marqueurs 🔁/🔒 par défaut de la nomenclature de référence (fusion unique via `taxoFlagsVersion`) |
 | `renameCategory` / `renameSubcategory` / `setCategoryActive` / `setSubActive` | Console d'administration : renommage et activation/désactivation (un élément désactivé disparaît des formulaires et de l'import CSV, l'existant reste compté) |
 | `monthlyExpenses(state, y, m)` | Totaux par enveloppe (`byEnv`), par catégorie bancaire (`byCat`), détail `env\|cat\|sub` et répartition incompressible / discrétionnaire |
 
@@ -124,7 +125,7 @@ Le modèle de données est volontairement simple :
 ## Tests
 
 La suite couvre : années bissextiles, tri et signe des opérations, exclusion des dépenses annuelles hors de leur mois, clamp du jour
-31, jours de paie (dont franchissement de week-end), 13ᵉ mois en juin/novembre, bonus de mars, dépenses exceptionnelles, revenus uniques (mode `unique`), vue de mois isolé (`monthSim`), liste des mois chargés (`loadedMonths`), point d'ancrage de la simulation (`simStart`), enchaînement des soldes d'un mois à l'autre, détection de découvert, passage à l'année suivante, migration des anciennes sauvegardes (dont conversion des anciennes catégories plates), intégrité de la nomenclature bancaire, rattachement des enveloppes et agrégats incompressible/discrétionnaire ; parsing de l'import CSV (dates et montants français, BOM/CRLF, lignes invalides, rapprochement des libellés, conversion en écritures, déduction de sous-catégorie via « Libellé opération ») ; anti-doublons de l'import (dépenses récurrentes mensuelles/annuelles, consommation unique d'une écriture, revenus fixe/salaire/unique). **102 tests** au total.
+31, jours de paie (dont franchissement de week-end), 13ᵉ mois en juin/novembre, bonus de mars, dépenses exceptionnelles, revenus uniques (mode `unique`), vue de mois isolé (`monthSim`), liste des mois chargés (`loadedMonths`), point d'ancrage de la simulation (`simStart`), enchaînement des soldes d'un mois à l'autre, détection de découvert, passage à l'année suivante, migration des anciennes sauvegardes (dont conversion des anciennes catégories plates), intégrité de la nomenclature bancaire, rattachement des enveloppes et agrégats incompressible/discrétionnaire ; parsing de l'import CSV (dates et montants français, BOM/CRLF, lignes invalides, rapprochement des libellés, conversion en écritures, déduction de sous-catégorie via « Libellé opération ») ; anti-doublons de l'import (dépenses récurrentes mensuelles/annuelles, consommation unique d'une écriture, revenus fixe/salaire/unique). **106 tests** au total.
 
 ```bash
 npm test            # une seule exécution

@@ -36,6 +36,8 @@ import {
   setSubActive,
   catByLabel,
   subByLabel,
+  TAXO_FLAGS_VERSION,
+  applyDefaultFlags,
 } from "./taxonomie.js";
 
 /* ------------------------------------------------------------------ */
@@ -419,9 +421,13 @@ describe("monthlyExpenses", () => {
   });
 
   it("sépare l'incompressible du discrétionnaire", () => {
+    // loyer 🔒 (marqueur dépense) vs resto sans marqueur — les défauts de la
+    // nomenclature (alimentation 🔒) ne doivent pas s'appliquer ici
     const state = baseState();
+    state.expenses[1] = {
+      id: "e2b", label: "Resto", amount: 200, day: 15, cat: "loisirs", sub: "restaurants", freq: "mensuelle",
+    };
     state.expenses[0].incompressible = true; // loyer 800
-    state.expenses[1].incompressible = false; // courses 200
     const agg = monthlyExpenses(state, 2026, 0);
     expect(agg.incompressible).toBe(800);
     expect(agg.discretionnaire).toBe(200);
@@ -667,12 +673,12 @@ describe("console d'administration — nomenclature dynamique", () => {
     const st = migrateState({
       soldeDepart: 0,
       expenses: [
-        { id: "e1", label: "Courses", amount: 200, day: 5, cat: "vie-quotidienne", sub: "alimentation", freq: "mensuelle" },
+        { id: "e1", label: "Resto", amount: 200, day: 5, cat: "loisirs", sub: "restaurants", freq: "mensuelle" },
       ],
     });
     const before = monthlyExpenses(st, 2026, 0);
     expect(before.incompressible).toBe(0);
-    st.taxonomie = setSubFlags(st.taxonomie, "vie-quotidienne", "alimentation", {
+    st.taxonomie = setSubFlags(st.taxonomie, "loisirs", "restaurants", {
       recurring: false,
       incompressible: true,
     });
@@ -769,5 +775,60 @@ describe("console d'administration — renommage et désactivation", () => {
     const before = monthlyExpenses(st, 2026, 0).total;
     st.taxonomie = setCategoryActive(st.taxonomie, "loisirs", false);
     expect(monthlyExpenses(st, 2026, 0).total).toBe(before);
+  });
+});
+
+describe("marqueurs par défaut de la nomenclature", () => {
+  it("la nomenclature de référence porte des marqueurs cohérents", () => {
+    expect(taxSub("logement", "loyers-charges").recurring).toBe(true);
+    expect(taxSub("logement", "loyers-charges").incompressible).toBe(true);
+    expect(taxSub("abonnements", "telephonie").recurring).toBe(true);
+    expect(taxSub("abonnements", "telephonie").incompressible).toBeFalsy();
+    expect(taxSub("loisirs", "restaurants").recurring).toBeFalsy();
+    expect(taxSub("loisirs", "restaurants").incompressible).toBeFalsy();
+    expect(taxSub("revenus-travail", "salaire-fixe").recurring).toBe(true);
+  });
+
+  it("applyDefaultFlags fusionne les défauts sans rien retirer", () => {
+    // copie sans marqueurs + un choix utilisateur à true conservé
+    const stripped = defaultTaxonomie().map((c) => ({
+      ...c,
+      subs: c.subs.map((s) => {
+        const { recurring, incompressible, ...rest } = s;
+        return { ...rest, recurring: false, incompressible: false };
+      }),
+    }));
+    stripped[1].subs[0].recurring = true; // alimentation : choix utilisateur
+    const merged = applyDefaultFlags(stripped);
+    const ali = taxSub("vie-quotidienne", "alimentation", merged);
+    expect(ali.recurring).toBe(true);   // défaut OU choix utilisateur
+    expect(ali.incompressible).toBe(true); // défaut ajouté
+    const loy = taxSub("logement", "loyers-charges", merged);
+    expect(loy.recurring).toBe(true);
+    expect(loy.incompressible).toBe(true);
+    const restos = taxSub("loisirs", "restaurants", merged);
+    expect(restos.recurring).toBe(false); // pas de défaut → inchangé
+    expect(restos.incompressible).toBe(false);
+  });
+
+  it("applyDefaultFlags ignore les catégories et sous-catégories personnalisées", () => {
+    const custom = addSubcategory(defaultTaxonomie(), "logement", { label: "Frais de gardiennage", recurring: true });
+    const withCustomCat = addCategory(custom, { label: "Assurance vie" });
+    const merged = applyDefaultFlags(withCustomCat);
+    expect(taxSub("logement", "frais-de-gardiennage", merged).recurring).toBe(true);
+    expect(merged[merged.length - 1].id).toBe("assurance-vie");
+  });
+
+  it("migrateState applique les défauts une seule fois (version enregistrée)", () => {
+    const legacy = migrateState({ soldeDepart: 0, taxoFlagsVersion: undefined });
+    expect(legacy.taxoFlagsVersion).toBe(TAXO_FLAGS_VERSION);
+    expect(taxSub("vie-quotidienne", "alimentation", legacy.taxonomie).incompressible).toBe(true);
+    // au second passage : un choix contraire de l'utilisateur est respecté
+    const chosen = setSubFlags(legacy.taxonomie, "vie-quotidienne", "alimentation", {
+      recurring: true,
+      incompressible: false,
+    });
+    const re = migrateState({ ...legacy, taxonomie: chosen });
+    expect(taxSub("vie-quotidienne", "alimentation", re.taxonomie).incompressible).toBe(false);
   });
 });

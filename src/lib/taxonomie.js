@@ -16,10 +16,10 @@ export const TAXONOMIE = [
   {
     id: "logement", label: "Logement", nature: "depense", env: "domestiques",
     subs: [
-      { id: "loyers-charges", label: "Loyers, Charges" },
-      { id: "emprunt-immo", label: "Emprunt immobilier" },
-      { id: "assurance-habitation", label: "Assurance habitation et RC" },
-      { id: "energie", label: "Energie (électricité, gaz, fuel, chauffage…)" },
+      { id: "loyers-charges", label: "Loyers, Charges" , recurring: true, incompressible: true },
+      { id: "emprunt-immo", label: "Emprunt immobilier" , recurring: true, incompressible: true },
+      { id: "assurance-habitation", label: "Assurance habitation et RC" , recurring: true, incompressible: true },
+      { id: "energie", label: "Energie (électricité, gaz, fuel, chauffage…)" , recurring: true, incompressible: true },
       { id: "travaux", label: "Travaux, réparation, entretien, aménagement…" },
       { id: "frais-exceptionnels", label: "Frais exceptionnels (déménagements, frais agences…)" },
     ],
@@ -27,7 +27,7 @@ export const TAXONOMIE = [
   {
     id: "vie-quotidienne", label: "Vie quotidienne", nature: "depense", env: "habituelles",
     subs: [
-      { id: "alimentation", label: "Alimentation" },
+      { id: "alimentation", label: "Alimentation" , recurring: true, incompressible: true },
       { id: "vetements", label: "Vêtements et accessoires" },
       { id: "livres", label: "Livres, CD/DVD, bijoux, jouets…" },
       { id: "electronique", label: "Électronique et informatique" },
@@ -50,7 +50,7 @@ export const TAXONOMIE = [
   {
     id: "voyages-transports", label: "Voyages et Transports", nature: "depense", env: "voyages",
     subs: [
-      { id: "quotidiens", label: "Transports quotidiens (métro, bus…)" },
+      { id: "quotidiens", label: "Transports quotidiens (métro, bus…)" , recurring: true, incompressible: true },
       { id: "longue-distance", label: "Transports longue distance (avions, trains…)" },
       { id: "taxis", label: "Taxis" },
       { id: "hebergement", label: "Hébergement (hôtels, camping…)" },
@@ -59,7 +59,7 @@ export const TAXONOMIE = [
   {
     id: "sante", label: "Santé", nature: "depense", env: "habituelles",
     subs: [
-      { id: "complementaires", label: "Complémentaires santé" },
+      { id: "complementaires", label: "Complémentaires santé" , recurring: true, incompressible: true },
       { id: "pharmacie", label: "Pharmacie et laboratoire" },
       { id: "medecins", label: "Médecins et frais médicaux" },
     ],
@@ -67,29 +67,29 @@ export const TAXONOMIE = [
   {
     id: "abonnements", label: "Abonnements et téléphonie", nature: "depense", env: "domestiques",
     subs: [
-      { id: "telephonie", label: "Téléphonie (fixe et mobile)" },
-      { id: "multimedia", label: "Multimédia à domicile (TV, internet, téléphonie…)" },
+      { id: "telephonie", label: "Téléphonie (fixe et mobile)" , recurring: true },
+      { id: "multimedia", label: "Multimédia à domicile (TV, internet, téléphonie…)" , recurring: true },
       { id: "autres", label: "Abonnements et téléphonie - Autres" },
     ],
   },
   {
     id: "services-financiers", label: "Services financiers / professionnels", nature: "depense", env: "domestiques",
     subs: [
-      { id: "frais-bancaires", label: "Frais bancaires et de gestion (dont agios)" },
+      { id: "frais-bancaires", label: "Frais bancaires et de gestion (dont agios)" , recurring: true, incompressible: true },
       { id: "remboursement-frais", label: "Remboursement de frais", env: "habituelles" },
     ],
   },
   {
     id: "impots-taxes", label: "Impôts et Taxes", nature: "depense", env: "domestiques",
     subs: [
-      { id: "impots-autres", label: "Impôts et Taxes - Autres" },
+      { id: "impots-autres", label: "Impôts et Taxes - Autres" , recurring: true, incompressible: true },
       { id: "remb-impots", label: "Remboursement impôts", nature: "revenu" },
     ],
   },
   {
     id: "auto-moto", label: "Auto et Moto", nature: "depense", env: "habituelles",
     subs: [
-      { id: "carburant", label: "Carburant" },
+      { id: "carburant", label: "Carburant" , recurring: true },
       { id: "peages", label: "Péages" },
       { id: "entretien", label: "Entretien, réparations…" },
     ],
@@ -104,13 +104,13 @@ export const TAXONOMIE = [
   {
     id: "emprunts-conso", label: "Emprunts (hors immobilier)", nature: "depense", env: "domestiques",
     subs: [
-      { id: "credit-conso", label: "Crédit conso" },
+      { id: "credit-conso", label: "Crédit conso" , recurring: true, incompressible: true },
     ],
   },
   {
     id: "epargne", label: "Dépenses d'épargne", nature: "depense", env: "domestiques",
     subs: [
-      { id: "epargne-bancaire", label: "Épargne bancaire (Livret A, PEL…)" },
+      { id: "epargne-bancaire", label: "Épargne bancaire (Livret A, PEL…)" , recurring: true },
     ],
   },
   {
@@ -150,7 +150,7 @@ export const TAXONOMIE = [
   {
     id: "revenus-travail", label: "Revenus du travail", nature: "revenu",
     subs: [
-      { id: "salaire-fixe", label: "Salaire fixe" },
+      { id: "salaire-fixe", label: "Salaire fixe" , recurring: true },
     ],
   },
   {
@@ -293,6 +293,41 @@ export function subByOperation(catId, opLabel, taxo = TAXONOMIE) {
 /* ------------------------------------------------------------------ */
 /* Console d'administration de la nomenclature                          */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Version des marqueurs par défaut (🔁/🔒) de la nomenclature. Quand un état
+ * sauvegardé porte une version différente (ou absente), `migrateState`
+ * applique les défauts par fusion (voir applyDefaultFlags) puis enregistre
+ * la version — les choix explicitement faits ensuite dans la console
+ * d'administration ne sont plus écrasés.
+ */
+export const TAXO_FLAGS_VERSION = 1;
+
+/**
+ * Fusionne les marqueurs 🔁/🔒 des sous-catégories de référence sur une
+ * nomenclature existante — fonction pure. La fusion ne retire jamais de
+ * marqueur : un indicateur déjà à `true` (choix de l'utilisateur) est
+ * conservé ; les sous-catégories personnalisées (hors nomenclature de
+ * référence) ne sont pas touchées.
+ */
+export function applyDefaultFlags(taxo) {
+  return taxo.map((c) => {
+    const ref = TAXONOMIE.find((x) => x.id === c.id);
+    if (!ref) return c;
+    return {
+      ...c,
+      subs: c.subs.map((s) => {
+        const refSub = ref.subs.find((x) => x.id === s.id);
+        if (!refSub) return s;
+        return {
+          ...s,
+          recurring: !!s.recurring || !!refSub.recurring,
+          incompressible: !!s.incompressible || !!refSub.incompressible,
+        };
+      }),
+    };
+  });
+}
 
 /** Copie profonde et indépendante de la nomenclature par défaut. */
 export function defaultTaxonomie() {

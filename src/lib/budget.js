@@ -14,7 +14,14 @@ export const ENVELOPPES = [
   { id: "exceptionnelles", label: "Exceptionnelles", color: "#8b5cf6" },
 ];
 
-import { defaultTaxonomie, envelopeOf, subIncompressible, taxCat } from "./taxonomie.js";
+import {
+  defaultTaxonomie,
+  envelopeOf,
+  subIncompressible,
+  taxCat,
+  TAXO_FLAGS_VERSION,
+  applyDefaultFlags,
+} from "./taxonomie.js";
 
 /**
  * Correspondance entre les anciennes catégories plates (≤ v0.2.x) et la
@@ -160,6 +167,12 @@ export function migrateState(raw) {
     ...i,
   }));
   s.taxonomie = normalizeTaxonomie(s.taxonomie);
+  // Marqueurs 🔁/🔒 par défaut : appliqués une seule fois (fusion), puis la
+  // version est enregistrée pour ne plus écraser les choix de l'utilisateur.
+  if (s.taxoFlagsVersion !== TAXO_FLAGS_VERSION) {
+    s.taxonomie = applyDefaultFlags(s.taxonomie);
+    s.taxoFlagsVersion = TAXO_FLAGS_VERSION;
+  }
   return s;
 }
 

@@ -12,6 +12,20 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.13.0] — 2026-10-03
+
+### Ajouté
+
+- **Marqueurs 🔁/🔒 par défaut sur la nomenclature de référence** : 15 sous-catégories typiques sont pré-marquées —
+  - récurrentes **et** incompressibles : Loyers et charges, Emprunt immobilier, Assurance habitation, Énergie, Alimentation, Transports quotidiens, Complémentaires santé, Frais bancaires, Impôts et Taxes, Crédit conso
+  - récurrentes seulement : Téléphonie, Multimédia à domicile, Carburant, Épargne bancaire, Salaire fixe
+- Application **une seule fois par fusion** (`applyDefaultFlags`, version `taxoFlagsVersion` enregistrée dans l'état) : les marqueurs déjà posés par l'utilisateur ne sont jamais retirés, les éléments personnalisés ne sont pas touchés, et les choix faits ensuite dans la console d'administration ne sont plus écrasés
+- Nouvelles fonctions dans `taxonomie.js` : `TAXO_FLAGS_VERSION`, `applyDefaultFlags`
+
+### Modifié
+
+- Les totaux du mois (incompressible vs discrétionnaire) prennent désormais en compte les marqueurs par défaut : une nouvelle dépense récurrente « Courses » sur *Alimentation* est comptée incompressible sans action de l'utilisateur
+
 ## [0.12.0] — 2026-10-03
 
 ### Ajouté
