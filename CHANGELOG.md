@@ -12,6 +12,18 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.7.0] — 2026-10-03
+
+### Modifié
+
+- **Import CSV : l'intitulé des écritures redevient le libellé simple** (sous-catégorie, sinon catégorie) — correction du comportement v0.6.0 : le libellé de l'opération bancaire n'est plus utilisé comme intitulé
+- **La colonne « Libellé opération » sert désormais d'aide à la détermination** : quand la colonne Sous-Catégorie est inconnue, la sous-catégorie est déduite par recherche d'inclusion du libellé de sous-catégorie dans le libellé d'opération (accents et casse ignorés, libellés trop courts ignorés)
+- Nouvelle fonction dans `taxonomie.js` : `subByOperation(catId, opLabel)` (recherche par inclusion tolérante)
+
+### Tests
+
+- Bloc de tests « Libellé opération » réécrit pour le comportement v0.7.0 : intitulé simple conservé, déduction de la sous-catégorie (ex. « PAIEMENT CARREFOUR ALIMENTATION COURSES » → Alimentation), repli sur la catégorie, `subByOperation` directement testée — **72 tests** au total
+
 ## [0.6.0] — 2026-10-03
 
 ### Ajouté

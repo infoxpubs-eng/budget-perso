@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseCsv, parseFrDate, parseFrAmount, rowsToEntries, matchesPlannedExpense, matchesPlannedIncome } from "./import-csv.js";
-import { catByLabel, subByLabel, normalizeLabel } from "./taxonomie.js";
+import { catByLabel, subByLabel, subByOperation, normalizeLabel } from "./taxonomie.js";
 
 /* Extrait réel d'un relevé bancaire (CRLF, séparateur « ; », colonne vide finale). */
 const SAMPLE =
@@ -261,7 +261,7 @@ describe("matchesPlannedExpense / matchesPlannedIncome", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Colonne « Libellé opération » (v0.6.0)                              */
+/* Colonne « Libellé opération » (v0.7.0)                              */
 /* ------------------------------------------------------------------ */
 
 describe("colonne « Libellé opération »", () => {
@@ -271,12 +271,12 @@ describe("colonne « Libellé opération »", () => {
     "30/09/2026;30/09/2026;PRELEVEMENT EUROPEEN DE: FREE MOBILE MANDAT FM-56688208-1;Abonnements et téléphonie;Téléphonie (fixe et mobile);-22,67;Non;\r\n" +
     "30/09/2026;30/09/2026;FRAIS PAIEMENT HORS ZONE EURO CARTE X0048 20/03 19,95 USD PAYS-BAS;Services financiers / professionnels;Frais bancaires et de gestion (dont agios);-1,35;Non;\r\n";
 
-  it("utilise le libellé de l'opération comme intitulé de la ligne", () => {
+  it("garde l'intitulé simple (sous-catégorie) même avec un libellé d'opération", () => {
     const { rows, ignored } = parseCsv(DETAILLE);
     expect(ignored).toBe(0);
     expect(rows).toHaveLength(2);
-    expect(rows[0].label).toBe("PRELEVEMENT EUROPEEN DE: FREE MOBILE MANDAT FM-56688208-1");
-    expect(rows[1].label).toBe("FRAIS PAIEMENT HORS ZONE EURO CARTE X0048 20/03 19,95 USD PAYS-BAS");
+    expect(rows[0].label).toBe("Téléphonie (fixe et mobile)");
+    expect(rows[1].label).toBe("Frais bancaires et de gestion (dont agios)");
     // Le rapprochement catégorie / sous-catégorie reste inchangé.
     expect(rows[0].cat).toBe("abonnements");
     expect(rows[0].sub).toBe("telephonie");
@@ -284,26 +284,42 @@ describe("colonne « Libellé opération »", () => {
     expect(rows[1].sub).toBe("frais-bancaires");
   });
 
-  it("retombe sur le libellé de la sous-catégorie quand la colonne est absente", () => {
+  it("déduit la sous-catégorie du libellé d'opération quand la colonne est inconnue", () => {
+    const csv =
+      "Date transaction;Date comptabilisation;Libellé opération;Catégorie;Sous-Catégorie;Montant;Pointée;\r\n" +
+      "30/09/2026;30/09/2026;PAIEMENT CARREFOUR ALIMENTATION COURSES;Vie quotidienne;Sous-catégorie Mystère;-51,20;Non;\r\n";
+    const { rows } = parseCsv(csv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cat).toBe("vie-quotidienne");
+    expect(rows[0].sub).toBe("alimentation");
+    expect(rows[0].label).toBe("Alimentation");
+  });
+
+  it("sans déduction possible, retombe sur le libellé de la catégorie", () => {
+    const csv =
+      "Date transaction;Date comptabilisation;Libellé opération;Catégorie;Sous-Catégorie;Montant;Pointée;\r\n" +
+      "30/09/2026;30/09/2026;VIREMENT INCONNU MYSTERE;Virements reçus;;250,00;Oui;\r\n";
+    const { rows } = parseCsv(csv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].sub).toBeUndefined();
+    expect(rows[0].label).toBe("Virements reçus");
+  });
+
+  it("sans colonne libellé, le comportement est inchangé", () => {
     const { rows } = parseCsv(SAMPLE);
     expect(rows[0].label).toBe("Téléphonie (fixe et mobile)");
   });
+});
 
-  it("retombe sur le libellé de la sous-catégorie quand le libellé est vide", () => {
-    const csv = DETAILLE.replace(
-      "PRELEVEMENT EUROPEEN DE: FREE MOBILE MANDAT FM-56688208-1",
-      ""
-    );
-    const { rows } = parseCsv(csv);
-    expect(rows[0].label).toBe("Téléphonie (fixe et mobile)");
+describe("subByOperation", () => {
+  it("retrouve une sous-catégorie par inclusion tolérante (accents, casse)", () => {
+    expect(subByOperation("vie-quotidienne", "PAIEMENT CARREFOUR ALIMENTATION COURSES").id).toBe("alimentation");
+    expect(subByOperation("vie-quotidienne", "achat vêtements et accessoires boutique").id).toBe("vetements");
   });
 
-  it("propage le libellé de l'opération jusqu'aux écritures importées", () => {
-    const { rows } = parseCsv(DETAILLE);
-    const { extras, depensesTotal } = rowsToEntries(rows);
-    expect(extras).toHaveLength(2);
-    expect(extras[0].label).toBe("PRELEVEMENT EUROPEEN DE: FREE MOBILE MANDAT FM-56688208-1");
-    expect(extras[0].amount).toBeCloseTo(22.67);
-    expect(depensesTotal).toBeCloseTo(24.02);
+  it("ne retourne rien sans correspondance", () => {
+    expect(subByOperation("vie-quotidienne", "AUCUN RAPPORT ICI")).toBeUndefined();
+    expect(subByOperation("cat-inconnue", "ALIMENTATION")).toBeUndefined();
+    expect(subByOperation("vie-quotidienne", "")).toBeUndefined();
   });
 });

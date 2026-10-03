@@ -269,3 +269,20 @@ export function subByLabel(catId, subLabel) {
   if (!c || !n) return undefined;
   return c.subs.find((s) => normalizeLabel(s.label) === n);
 }
+
+/**
+ * Sous-catégorie d'une catégorie dont le libellé **apparaît dans** un libellé
+ * d'opération bancaire (recherche par inclusion, tolérante aux accents et à
+ * la casse). Les libellés trop courts (< 4 caractères normalisés) sont
+ * ignorés pour éviter les faux positifs. Sert de repli à l'import CSV quand
+ * la colonne Sous-Catégorie est inconnue.
+ */
+export function subByOperation(catId, opLabel) {
+  const c = taxCat(catId);
+  const n = normalizeLabel(opLabel);
+  if (!c || !n) return undefined;
+  return c.subs.find((s) => {
+    const sn = normalizeLabel(s.label);
+    return sn.length >= 4 && n.includes(sn);
+  });
+}

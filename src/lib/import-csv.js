@@ -10,9 +10,11 @@
  * - Catégorie / Sous-Catégorie rapprochées de la nomenclature bancaire
  *   (taxonomie.js) de façon tolérante : accents, casse, «…» et parenthèses
  *   ignorés ; une sous-catégorie inconnue reste importée sans sous-catégorie.
- * - Colonne « Libellé opération » (optionnelle) : son contenu devient
- *   l'intitulé de l'écriture importée (sinon, libellé de la sous-catégorie
- *   ou de la catégorie).
+ * - Colonne « Libellé opération » (optionnelle) : elle n'est pas utilisée
+ *   comme intitulé ; elle aide uniquement à déterminer la sous-catégorie
+ *   quand la colonne Sous-Catégorie est inconnue (recherche par inclusion
+ *   dans le libellé d'opération). L'intitulé des écritures reste le libellé
+ *   simple : sous-catégorie, sinon catégorie.
  * - Les lignes dont la catégorie est inconnue (ou la date / le montant
  *   illisibles) sont ignorées et comptées.
  * - Les lignes correspondant à des écritures déjà planifiées (dépenses
@@ -26,7 +28,7 @@
  * Module sans dépendance React : testable isolément (voir import-csv.test.js).
  */
 
-import { catByLabel, subByLabel, taxCat, taxSub } from "./taxonomie.js";
+import { catByLabel, subByLabel, subByOperation, taxCat, taxSub } from "./taxonomie.js";
 
 /* ------------------------------------------------------------------ */
 /* Analyse CSV                                                          */
@@ -120,9 +122,13 @@ export function parseCsv(text) {
     const catLabel = cells[iCat] ?? "";
     const subLabel = iSub >= 0 ? cells[iSub] ?? "" : "";
     const cat = catByLabel(catLabel);
-    const sub = cat ? subByLabel(cat.id, subLabel) : undefined;
-    // Libellé de l'opération : prioritaire s'il est présent et non vide.
+    // Libellé de l'opération : aide à déterminer la sous-catégorie quand la
+    // colonne Sous-Catégorie est inconnue (recherche par inclusion).
     const opLabel = iLabel >= 0 ? cells[iLabel] ?? "" : "";
+    const sub = cat
+      ? (subByLabel(cat.id, subLabel) ??
+        (opLabel !== "" ? subByOperation(cat.id, opLabel) : undefined))
+      : undefined;
 
     if (!date || amount === undefined || amount === 0 || !cat) {
       ignored++;
@@ -137,7 +143,7 @@ export function parseCsv(text) {
       amount,
       cat: cat.id,
       sub: sub ? sub.id : undefined,
-      label: opLabel !== "" ? opLabel : sub ? sub.label : cat.label,
+      label: sub ? sub.label : cat.label,
     });
   }
 
