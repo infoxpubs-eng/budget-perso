@@ -15,6 +15,9 @@ import {
   loadedMonths,
   simStart,
   monthlyExpenses,
+  isRecurringExpense,
+  isRecurringIncome,
+  recurringSchedule,
 } from "./budget.js";
 import {
   TAXONOMIE,
@@ -830,5 +833,78 @@ describe("marqueurs par défaut de la nomenclature", () => {
     });
     const re = migrateState({ ...legacy, taxonomie: chosen });
     expect(taxSub("vie-quotidienne", "alimentation", re.taxonomie).incompressible).toBe(false);
+  });
+});
+
+
+/* ------------------------------------------------------------------ */
+/* Récurrence du modèle                                                */
+/* ------------------------------------------------------------------ */
+
+describe("récurrence du modèle", () => {
+  it("tout mensuel ou annuel est récurrent", () => {
+    expect(isRecurringExpense({ freq: "mensuelle" })).toBe(true);
+    expect(isRecurringExpense({ freq: "annuelle" })).toBe(true);
+    expect(isRecurringExpense({ freq: "unique" })).toBe(false);
+  });
+
+  it("les salaires et revenus à jour fixe sont récurrents, les uniques non", () => {
+    expect(isRecurringIncome({ mode: "salaire" })).toBe(true);
+    expect(isRecurringIncome({ mode: "fixe" })).toBe(true);
+    expect(isRecurringIncome({ mode: "unique" })).toBe(false);
+  });
+
+  it("transactionsOfMonth marque chaque opération rec (récurrent) ou non", () => {
+    const state = baseState();
+    state.extras.push({ id: "x1", label: "Réparation voiture", amount: 400, day: 18, y: 2026, m: 0, cat: "exceptionnelles" });
+    state.incomes.push({ id: "i2", label: "Remboursement", amount: 1.35, mode: "unique", day: 30, y: 2026, m: 0, cat: "services-financiers", sub: "remboursement-frais" });
+    const tx = transactionsOfMonth(state, 2026, 0);
+    expect(tx.find((t) => t.label === "Loyer").rec).toBe(true);
+    expect(tx.find((t) => t.label === "Salaire").rec).toBe(true);
+    expect(tx.find((t) => t.label === "Réparation voiture").rec).toBe(false);
+    expect(tx.find((t) => t.label === "Remboursement").rec).toBe(false);
+    expect(tx.every((t) => typeof t.rec === "boolean")).toBe(true);
+  });
+
+  it("une dépense non récurrente (hors modèle) n'est pas planifiée", () => {
+    const state = baseState();
+    state.expenses.push({ id: "e9", label: "Achat isolé", amount: 120, day: 12, cat: "loisirs", freq: "unique" });
+    const tx = transactionsOfMonth(state, 2026, 0);
+    expect(tx.some((t) => t.label === "Achat isolé")).toBe(false);
+  });
+
+  it("le 13ᵉ mois et le bonus d'un salaire sont récurrents", () => {
+    const state = baseState();
+    state.incomes = [{ id: "i1", label: "Salaire", amount: 2000, mode: "salaire", treizieme: true, bonus: 500 }];
+    const juin = transactionsOfMonth(state, 2026, 5);
+    expect(juin.filter((t) => t.label.startsWith("Salaire")).every((t) => t.rec)).toBe(true);
+    expect(juin.some((t) => t.label.includes("13ᵉ"))).toBe(true);
+    const mars = transactionsOfMonth(state, 2026, 2);
+    expect(mars.filter((t) => t.label.startsWith("Salaire")).every((t) => t.rec)).toBe(true);
+    expect(mars.some((t) => t.label.includes("bonus"))).toBe(true);
+  });
+
+  it("recurringSchedule groupe les échéances récurrentes par jour, triées", () => {
+    const state = baseState(); // Loyer le 3, Courses le 15, Salaire fixe le 27 (janvier)
+    const sched = recurringSchedule(state, 2026, 0);
+    expect(sched.map((d) => d.day)).toEqual([3, 15, 27]);
+    expect(sched[0].ops.map((o) => o.label)).toEqual(["Loyer"]);
+    expect(sched[0].total).toBe(-800);
+    expect(sched[2].total).toBe(2000);
+  });
+
+  it("recurringSchedule exclut les opérations exceptionnelles et uniques", () => {
+    const state = baseState();
+    state.extras.push({ id: "x1", label: "Réparation voiture", amount: 400, day: 3, y: 2026, m: 0, cat: "exceptionnelles" });
+    state.incomes.push({ id: "i2", label: "Remboursement", amount: 1.35, mode: "unique", day: 15, y: 2026, m: 0, cat: "services-financiers", sub: "remboursement-frais" });
+    const sched = recurringSchedule(state, 2026, 0);
+    expect(sched.some((d) => d.ops.some((o) => o.label === "Réparation voiture"))).toBe(false);
+    expect(sched.some((d) => d.ops.some((o) => o.label === "Remboursement"))).toBe(false);
+  });
+
+  it("migrateState ne crée jamais de dépense exceptionnelle par défaut", () => {
+    const s = migrateState({ soldeDepart: 500 });
+    expect(s.extras).toEqual([]);
+    expect(s.incomes).toEqual([]);
   });
 });

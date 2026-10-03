@@ -181,20 +181,43 @@ export function migrateState(raw) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Récurrence d'une dépense planifiée : tout ce qui est mensuel ou annuel est
+ * forcément récurrent (prélèvement ou paiement régulier). `freq` décrit le
+ * motif de la récurrence (chaque mois / un mois donné), pas l'exceptionnel.
+ * Les dépenses non récurrentes n'ont pas leur place dans `expenses` :
+ * elles sont exceptionnelles et vivent dans `extras`, à leur date réelle.
+ */
+export function isRecurringExpense(e) {
+  return e.freq === "mensuelle" || e.freq === "annuelle";
+}
+
+/**
+ * Récurrence d'un revenu : les salaires (versés chaque mois selon la même
+ * règle) et les revenus à jour fixe sont récurrents ; seul le mode `unique`
+ * ne l'est pas. Exceptionnel = uniquement ce qui est flagué comme tel.
+ */
+export function isRecurringIncome(i) {
+  return i.mode !== "unique";
+}
+
+/**
  * Liste des opérations d'un mois donné, triées par jour.
- * - dépenses récurrentes (mensuelles ou annuelles, jour ramené à la fin des mois courts)
- * - dépenses exceptionnelles (date précise {y, m, day})
- * - revenus à jour fixe
- * - revenus type "salaire" : versés l'avant-veille du dernier jour ouvré,
- *   avec en option la ½ du 13ᵉ mois en juin et novembre, et un bonus estimé en mars.
+ * - paiements récurrents : dépenses mensuelles ou annuelles (jour ramené à la
+ *   fin des mois courts — les dates restent stables d'un mois sur l'autre) et
+ *   revenus récurrents (salaire versé l'avant-veille du dernier jour ouvré,
+ *   ½ du 13ᵉ mois en juin et novembre, bonus estimé en mars, jour fixe)
+ * - opérations exceptionnelles, uniquement celles flaguées comme telles :
+ *   dépenses à date précise {y, m, day} et revenus uniques
+ * - chaque opération porte `rec` (récurrent) en plus de `inc` (incompressible)
  *
- * @returns {Array<{day:number,label:string,amount:number,type:"in"|"out",cat:string,sub?:string,inc:boolean}>}
+ * @returns {Array<{day:number,label:string,amount:number,type:"in"|"out",cat:string,sub?:string,inc:boolean,rec:boolean}>}
  */
 export function transactionsOfMonth(state, y, m) {
   const tx = [];
   const dim = daysInMonth(y, m);
 
   for (const e of state.expenses) {
+    if (!isRecurringExpense(e)) continue; // le moteur raisonne en récurrence
     if (e.freq === "annuelle" && (e.month ?? 1) - 1 !== m) continue;
     tx.push({
       day: Math.min(e.day, dim),
@@ -204,6 +227,7 @@ export function transactionsOfMonth(state, y, m) {
       cat: e.cat,
       sub: e.sub,
       inc: !!e.incompressible || subIncompressible(e.cat, e.sub, state.taxonomie),
+      rec: true,
     });
   }
 
@@ -217,11 +241,12 @@ export function transactionsOfMonth(state, y, m) {
       cat: x.cat ?? "logement",
       sub: x.sub ?? "frais-exceptionnels",
       inc: !!x.incompressible || subIncompressible(x.cat, x.sub, state.taxonomie),
+      rec: false,
     });
   }
 
   for (const i of state.incomes) {
-    if (i.mode === "unique") {
+    if (!isRecurringIncome(i)) {
       if (i.y !== y || i.m !== m) continue;
       tx.push({
         day: Math.min(i.day, dim),
@@ -231,15 +256,16 @@ export function transactionsOfMonth(state, y, m) {
         cat: i.cat ?? "revenus-travail",
         sub: i.sub,
         inc: false,
+        rec: false,
       });
     } else if (i.mode === "salaire") {
       const day = salaryPayDay(y, m);
-      tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false });
+      tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec: true });
       if (i.treizieme && (m === 5 || m === 10)) {
-        tx.push({ day, label: i.label + " · 13ᵉ mois (½)", amount: i.amount / 2, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false });
+        tx.push({ day, label: i.label + " · 13ᵉ mois (½)", amount: i.amount / 2, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec: true });
       }
       if ((i.bonus ?? 0) > 0 && m === 2) {
-        tx.push({ day, label: i.label + " · bonus estimé", amount: i.bonus, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false });
+        tx.push({ day, label: i.label + " · bonus estimé", amount: i.bonus, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec: true });
       }
     } else {
       tx.push({
@@ -250,12 +276,37 @@ export function transactionsOfMonth(state, y, m) {
         cat: i.cat ?? "revenus-travail",
         sub: i.sub ?? "salaire-fixe",
         inc: false,
+        rec: true,
       });
     }
   }
 
   tx.sort((a, b) => a.day - b.day);
   return tx;
+}
+
+/**
+ * Échéancier récurrent d'un mois : les paiements récurrents du mois groupés
+ * par jour d'échéance, triés du premier au dernier jour. Les dates étant
+ * stables d'un mois sur l'autre (souvent similaires), cet échéancier dessine
+ * la trajectoire du solde — et donc les point bas — des mois à venir.
+ *
+ * @returns {Array<{day:number, total:number, ops:Array}>}
+ */
+export function recurringSchedule(state, y, m) {
+  const tx = transactionsOfMonth(state, y, m).filter((t) => t.rec);
+  const byDay = new Map();
+  for (const t of tx) {
+    if (!byDay.has(t.day)) byDay.set(t.day, []);
+    byDay.get(t.day).push(t);
+  }
+  return [...byDay.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([day, ops]) => ({
+      day,
+      total: ops.reduce((a, t) => a + t.amount, 0),
+      ops,
+    }));
 }
 
 /* ------------------------------------------------------------------ */

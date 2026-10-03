@@ -27,6 +27,9 @@ import {
   simStart,
   migrateState,
   monthlyExpenses,
+  isRecurringExpense,
+  isRecurringIncome,
+  recurringSchedule,
 } from "./lib/budget.js";
 import {
   TAXONOMIE,
@@ -49,8 +52,6 @@ import { parseCsv, rowsToEntries } from "./lib/import-csv.js";
 
 /* ============================== Données initiales ============================== */
 
-const now0 = new Date();
-
 const DEFAULT_STATE = migrateState({
   soldeDepart: 1500,
   expenses: [
@@ -68,9 +69,8 @@ const DEFAULT_STATE = migrateState({
     { id: uuid(), label: "Salaire", amount: 2500, mode: "salaire", treizieme: true, bonus: 1000 },
     { id: uuid(), label: "Aide / allocations", amount: 180, day: 5, mode: "fixe" },
   ],
-  extras: [
-    { id: uuid(), label: "Réparation voiture", amount: 350, day: 18, y: now0.getFullYear(), m: now0.getMonth(), cat: "auto-moto", sub: "entretien" },
-  ],
+  extras: [], // rien d'exceptionnel par défaut : seules les situations
+  // explicitement flaguées comme telles entrent dans la simulation
   budgets: { domestiques: 1000, habituelles: 500, sports: 50, loisirs: 120, voyages: 100, exceptionnelles: 300 },
 });
 
@@ -154,6 +154,10 @@ const IncBadge = () => (
   <Badge color="#475569">🔒 Incompressible</Badge>
 );
 
+const RecBadge = () => (
+  <Badge color="#0ea5e9">🔁 Récurrent</Badge>
+);
+
 function CheckRow({ checked, onChange, label }) {
   return (
     <label className="flex items-center gap-2 py-1 text-sm text-slate-700">
@@ -184,6 +188,7 @@ function BalanceTooltip({ active, payload }) {
               <span className="text-slate-600">
                 {e.label}
                 {e.inc ? " 🔒" : ""}
+                {e.rec ? " 🔁" : " ✨"}
               </span>
               <span className={e.type === "in" ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
                 {e.type === "in" ? "+" : "−"}{fmt(Math.abs(e.amount))}
@@ -201,7 +206,10 @@ function SimpleTooltip({ active, payload, label }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg text-xs">
       <div className="font-semibold text-slate-600">{label}</div>
-      <div className="mt-1 font-bold text-slate-900">{fmt(payload[0].value)}</div>
+      <div className="mt-1 font-bold text-slate-900">Fin de mois : {fmt(payload[0].value)}</div>
+      {payload.length > 1 && (
+        <div className="mt-0.5 text-amber-600">Point bas : {fmt(payload[1].value)}</div>
+      )}
     </div>
   );
 }
@@ -420,7 +428,8 @@ export default function App() {
       flux: d.events.reduce((a, e) => a + e.amount, 0),
     }));
 
-  const yearData = sims.map((s) => ({ label: s.label, solde: s.end }));
+  const yearData = sims.map((s) => ({ label: s.label, solde: s.end, bas: s.min }));
+  const echeancier = useMemo(() => recurringSchedule(state, sim.y, sim.m), [state, sim]);
 
   const tabs = [
     { id: "apercu", label: "Aperçu" },
@@ -619,7 +628,7 @@ export default function App() {
                               <div className="font-semibold text-slate-600">{label} {MONTHS[sim.m]}</div>
                               {(day ? day.events : []).map((e, i) => (
                                 <div key={i} className="mt-1 flex justify-between gap-6">
-                                  <span>{e.label}{e.inc ? " 🔒" : ""}</span>
+                                  <span>{e.label}{e.inc ? " 🔒" : ""}{e.rec ? " 🔁" : " ✨"}</span>
                                   <span className={e.type === "in" ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
                                     {e.type === "in" ? "+" : "−"}{fmt(Math.abs(e.amount))}
                                   </span>
@@ -646,6 +655,7 @@ export default function App() {
                 <p className="mb-3 text-xs text-slate-500">
                   Enchaînement des mois à partir de {monthLabel(anchor.y, anchor.m)} avec le solde de départ de {fmt(state.soldeDepart)}
                   {hist.months.length > 0 && <> ; historique enchaîné jusqu'à {monthLabel(start.y, start.m)} (ouverture : {fmt(sims[0].start)})</>}.
+                  <span className="text-amber-600"> Point bas du mois en pointillés : il suit les dates des prélèvements récurrents 🔁, stables d'un mois sur l'autre.</span>
                 </p>
                 <div className="h-60">
                   <ResponsiveContainer width="100%" height="100%">
@@ -670,11 +680,55 @@ export default function App() {
                           />
                         )}
                       />
+                      <Line
+                        type="monotone"
+                        dataKey="bas"
+                        stroke="#f59e0b"
+                        strokeWidth={1.5}
+                        strokeDasharray="4 3"
+                        dot={false}
+                      />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
               </Card>
             </div>
+
+            <Card>
+              <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="font-semibold">Échéancier récurrent 🔁 — {sim.label}</h2>
+                <span className="text-xs text-slate-500">
+                  {echeancier.length} jour(s) d'échéance · {echeancier.reduce((a, d) => a + d.ops.length, 0)} opération(s) récurrente(s)
+                </span>
+              </div>
+              <p className="mb-3 text-xs text-slate-500">
+                Les dates des prélèvements et paiements récurrents sont souvent similaires d'un mois sur l'autre :
+                elles dessinent à l'avance la trajectoire du solde et les point bas des mois à venir.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {echeancier.map((d) => (
+                  <div key={d.day} className="min-w-[9rem] rounded-lg border border-slate-200 px-3 py-2 text-xs">
+                    <div className="font-semibold text-slate-700">Le {d.day}</div>
+                    {d.ops.map((op, i) => (
+                      <div key={i} className="mt-1 flex items-baseline justify-between gap-2">
+                        <span className="truncate text-slate-600">{op.label}{op.inc ? " 🔒" : ""}</span>
+                        <span className={op.type === "in" ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
+                          {op.type === "in" ? "+" : "−"}{fmt(Math.abs(op.amount))}
+                        </span>
+                      </div>
+                    ))}
+                    <div className={"mt-1 border-t border-slate-100 pt-1 font-semibold " + (d.total >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                      Net : {d.total >= 0 ? "+" : "−"}{fmt(Math.abs(d.total))}
+                    </div>
+                  </div>
+                ))}
+                {echeancier.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
+                    Aucune échéance récurrente ce mois-ci.
+                  </div>
+                )}
+              </div>
+            </Card>
           </div>
         )}
 
@@ -697,6 +751,7 @@ export default function App() {
                             <span>Le {e.day} du mois</span>
                             <span>·</span>
                             {e.freq === "annuelle" ? <span>{MONTHS[(e.month ?? 1) - 1]}</span> : <span>Chaque mois</span>}
+                            {isRecurringExpense(e) && <RecBadge />}
                             <Badge color={env ? env.color : "#94a3b8"}>{c ? c.label : "?"}</Badge>
                             {s && <span>{s.label}</span>}
                             {e.incompressible && <IncBadge />}
@@ -798,6 +853,7 @@ export default function App() {
                         ) : (
                           <span>Le {i.day} du mois</span>
                         )}
+                        {isRecurringIncome(i) ? <RecBadge /> : <Badge color="#f59e0b">✨ Unique</Badge>}
                         {i.cat && <Badge color="#10b981">{labelOf(i.cat, i.sub, taxo)}</Badge>}
                       </div>
                     </div>

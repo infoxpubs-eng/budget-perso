@@ -12,6 +12,21 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.14.0] — 2026-10-03
+
+### Ajouté
+
+- **Modèle par récurrence** : le moteur raisonne en récurrence, plus en `freq`.
+  - nouvelles fonctions `isRecurringExpense` (tout mensuel ou annuel est forcément récurrent) et `isRecurringIncome` (salaires versés chaque mois selon la même règle + revenus à jour fixe = récurrents ; seul le mode `unique` ne l'est pas) ;
+  - chaque opération du mois porte désormais `rec` (récurrent) en plus de `inc` (incompressible) : les marqueurs 🔁 (récurrent) / ✨ (exceptionnel) apparaissent dans les listes et les infobulles.
+- **Graphique 12 mois : point bas de chaque mois** (ligne pointillée ambre) — les dates des prélèvements récurrents étant stables d'un mois sur l'autre, le point bas est prévisible et affine la lecture des soldes fin de mois à venir ; l'infobulle affiche « fin de mois » et « point bas ».
+- **Échéancier récurrent** dans l'aperçu : les paiements récurrents du mois affiché, groupés par jour d'échéance avec le net du jour (nouvelle fonction `recurringSchedule`).
+
+### Modifié
+
+- **Plus aucune écriture exceptionnelle par défaut** : l'état initial ne contient ni dépense exceptionnelle ni revenu unique — seules les situations explicitement flaguées comme telles entrent dans la simulation (l'exemple « Réparation voiture » est retiré de la démonstration).
+- `transactionsOfMonth` ne planifie plus une dépense non récurrente (hors modèle) ; le motif `freq` (mensuelle/annuelle) décrit la récurrence, il ne définit plus l'exceptionnel.
+
 ## [0.13.0] — 2026-10-03
 
 ### Ajouté
