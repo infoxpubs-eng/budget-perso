@@ -205,6 +205,44 @@ export function mergeHistory(existing = [], obs = []) {
 }
 
 /**
+ * Fusionne les lignes ajoutées par un import dans les lignes existantes,
+ * en DÉDOUBLONNANT par multiset : clé = jour|mois|année|catégorie|
+ * sous-catégorie|montant (centimes)|libellé. Pour chaque clé, seules
+ * `max(0, ajoutées − existantes)` copies sont conservées — réimporter un
+ * même relevé n'ajoute donc rien, tandis que les vrais doublons d'un
+ * relevé (deux opérations identiques le même jour) restent distincts.
+ *
+ * @param {Array} existing lignes déjà enregistrées
+ * @param {Array} added lignes ajoutées par l'import
+ * @returns {Array} copie de `added` débarrassée des lignes déjà présentes
+ */
+export function mergeAddedLines(existing = [], added = []) {
+  const keyOf = (x) =>
+    [
+      x.day,
+      x.m,
+      x.y,
+      x.cat,
+      x.sub,
+      Math.round(Math.abs(x.amount ?? 0) * 100),
+      x.label,
+    ].join("|");
+  const counts = new Map();
+  for (const x of existing ?? []) {
+    const k = keyOf(x);
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const out = [];
+  for (const x of added ?? []) {
+    const k = keyOf(x);
+    const n = counts.get(k) ?? 0;
+    if (n > 0) counts.set(k, n - 1);
+    else out.push(x);
+  }
+  return out;
+}
+
+/**
  * Valeur la plus fréquente d'un tableau (la première insérée l'emporte en
  * cas d'égalité) — jour type d'un prélèvement récurrent, par exemple.
  */
@@ -426,10 +464,12 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
   /**
    * Rattache ou crée les écritures récurrentes des séries d'un couple.
    * Rattachement (aucune écriture en double) : le couple a une seule
-   * écriture planifiée, non rapprochée ce mois-ci — la série lui est
-   * rattachée, occurrences dans son historique et montant prévisionnel
-   * synchronisé sur la dernière occurrence. Sinon, chaque série devient
-   * une écriture récurrente planifiée au dernier montant observé.
+   * écriture planifiée, soit couvrant déjà tous les mois de la série
+   * (réimport — l'historique se refusionne, dédupliqué), soit non
+   * rapprochée ce mois-ci — la série lui est rattachée, occurrences dans
+   * son historique et montant prévisionnel synchronisé sur la dernière
+   * occurrence. Sinon, chaque série devient une écriture récurrente
+   * planifiée au dernier montant observé.
    */
   const applySeries = (kind, recurring, planned, isCandidate, pushNew, countCouvertes) => {
     for (const [ck, rs] of recurring) {
@@ -440,11 +480,21 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
         const last = sorted[sorted.length - 1];
         const months = new Set(ser.map((r) => r.y + "-" + r.m));
         const candidates = planned.filter((x) => isCandidate(x, cat, sub));
+        // Réimport d'un relevé : une écriture du couple dont l'historique
+        // couvre déjà tous les mois de la série → rattachement à cette
+        // écriture (aucune écriture en double ; les occurrences refusionnent,
+        // dédupliquées par mergeHistory). Sinon, rattachement seulement si le
+        // couple a une seule écriture planifiée, non rapprochée ce mois-ci.
+        const coversSeries = (x) => {
+          const known = new Set((x.history ?? []).map((h) => h.y + "-" + h.m));
+          return [...months].every((mm) => known.has(mm));
+        };
         const target =
-          candidates.length === 1 &&
+          candidates.find(coversSeries) ??
+          (candidates.length === 1 &&
           ![...(matchedMonths.get(candidates[0].id) ?? [])].some((mm) => months.has(mm))
             ? candidates[0]
-            : null;
+            : null);
         if (target) {
           for (const r of ser) {
             recordObs(target, kind, r, true);

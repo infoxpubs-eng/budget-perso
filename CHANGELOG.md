@@ -12,6 +12,17 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.21.0] — 2026-10-03
+
+### Ajouté
+
+- **Solde de fin de mois probable** : nouveau KPI de l'Aperçu qui retranche du solde simulé une **provision pour habitudes non planifiées**, apprise des relevés importés. Le moteur (`src/lib/estimation.js`) calcule pour chaque couple catégorie / sous-catégorie sans écriture planifiée la **tendance = médiane des totaux mensuels** sur une fenêtre d'au plus 6 mois complets (mois sans dépense comptés zéro), provisionnée seulement si le couple est présent dans au moins 50 % des mois de la fenêtre — une dépense exceptionnelle n'influence pas la prévision. La **provision restante** du mois vaut `max(0, tendance − déjà dépensé ce mois-ci)` : lissée sur les jours restants, elle se réactualise à chaque import. Aucun revenu n'est estimé statistiquement ; les couples portés par une écriture planifiée sont exclus (pas de double comptage) ; sans relevé importé, la provision est nulle.
+- **Onglet « 📅 Échéancier » — carte « Habitudes non planifiées — provision restante »** : par couple, la tendance, le déjà-dépensé et le restant provisionné du mois affiché, avec le total et le lissage sur les jours restants du mois en cours.
+
+### Corrigé
+
+- **Réimport d'un relevé** : les dépenses exceptionnelles et revenus uniques sont dédoublonnés par multiset (`mergeAddedLines` — date, couple, montant au centime, libellé ; les vrais doublons d'opérations restent distincts), et une série 🔁 dont tous les mois sont déjà dans l'historique d'une écriture est **rattachée à cette écriture** au lieu d'en créer une nouvelle : réimporter un même relevé ne change plus rien (idempotence), y compris pour les couples découpés en plusieurs séries.
+
 ## [0.20.0] — 2026-10-03
 
 ### Corrigé

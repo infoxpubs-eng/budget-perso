@@ -18,6 +18,7 @@ import { v4 as uuid } from "uuid";
 import {
   ENVELOPPES,
   MONTHS,
+  daysInMonth,
   fmt,
   monthLabel,
   salaryPayDay,
@@ -49,7 +50,8 @@ import {
   setCategoryActive,
   setSubActive,
 } from "./lib/taxonomie.js";
-import { parseCsv, rowsToEntries, applyTaxoAdditions, mergeHistory, A_CLASSER } from "./lib/import-csv.js";
+import { parseCsv, rowsToEntries, applyTaxoAdditions, mergeHistory, mergeAddedLines, A_CLASSER } from "./lib/import-csv.js";
+import { remainingProvision, TENDENCY_WINDOW, PRESENCE_MIN } from "./lib/estimation.js";
 
 /* ============================== Données initiales ============================== */
 
@@ -433,6 +435,10 @@ export default function App() {
             : entry.amount;
         return { ...entry, history, amount };
       };
+      // Lignes ajoutées (dépenses et revenus uniques) dédoublonnées par
+      // multiset : réimporter un même relevé n'ajoute rien.
+      const extrasIn = mergeAddedLines(s.extras, r.extras.map(remap));
+      const uniquesIn = mergeAddedLines(s.incomes, r.incomes.map(remap));
       return {
         ...s,
         taxonomie: taxo,
@@ -440,9 +446,9 @@ export default function App() {
         incomes: [
           ...s.incomes.map((i) => withHistory(i, "revenu")),
           ...r.newIncomes.map(remap),
-          ...r.incomes.map(remap),
+          ...uniquesIn,
         ],
-        extras: [...s.extras, ...r.extras.map(remap)],
+        extras: [...s.extras, ...extrasIn],
       };
     });
     setCsvImport(null);
@@ -480,6 +486,12 @@ export default function App() {
   const yearData = sims.map((s) => ({ label: s.label, solde: s.end, bas: s.min }));
   const echeancier = useMemo(() => recurringSchedule(state, sim.y, sim.m), [state, sim]);
   const recTotals = useMemo(() => recurringMonthTotals(state, sim.y, sim.m), [state, sim]);
+  // Provision « habitudes non planifiées » du mois affiché : tendances des
+  // couples sans écriture planifiée, moins ce qui est déjà dépensé.
+  const prov = useMemo(
+    () => remainingProvision({ extras: state.extras, expenses: state.expenses, y: sim.y, m: sim.m }),
+    [state.extras, state.expenses, sim.y, sim.m]
+  );
   const recYear = useMemo(
     () => sims.map((s) => ({ label: s.label, min: s.min, minDay: s.minDay, end: s.end, ...recurringMonthTotals(state, s.y, s.m) })),
     [state, sims]
@@ -600,7 +612,7 @@ export default function App() {
         {/* ------------------------------ APERÇU ------------------------------ */}
         {tab === "apercu" && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
               <Kpi label="Solde en début de mois" value={fmt(sim.start)} />
               <Kpi label="Revenus du mois" value={"+ " + fmt(sim.totalIn)} tone="good" />
               <Kpi label="Dépenses du mois" value={"− " + fmt(sim.totalOut)} tone="bad" />
@@ -615,6 +627,18 @@ export default function App() {
                 value={fmt(sim.end)}
                 tone={sim.end >= 0 ? "accent" : "bad"}
                 hint={sim.end >= sim.start ? "Évolution : + " + fmt(sim.end - sim.start) : "Évolution : − " + fmt(sim.start - sim.end)}
+              />
+              <Kpi
+                label="Solde fin de mois probable"
+                value={fmt(sim.end - prov.total)}
+                tone={sim.end - prov.total >= 0 ? "accent" : "bad"}
+                hint={
+                  prov.total > 0
+                    ? "Habitudes non planifiées : − " + fmt(prov.total)
+                    : state.extras.length > 0
+                      ? "Habitudes non planifiées : aucune provision"
+                      : "Importez un relevé pour estimer vos habitudes"
+                }
               />
             </div>
 
@@ -1061,6 +1085,42 @@ export default function App() {
                 {echeancier.length === 0 && (
                   <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
                     Aucune échéance récurrente ce mois-ci.
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            <Card>
+              <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="font-semibold">Habitudes non planifiées — provision restante</h2>
+                <span className="text-xs font-semibold text-rose-600">− {fmt(prov.total)}</span>
+              </div>
+              <p className="mb-3 text-xs text-slate-500">
+                Tendance par couple sans écriture planifiée, apprise des relevés importés :
+                médiane des mois observés sur une fenêtre de {TENDENCY_WINDOW} mois complets
+                (zéros inclus), provisionnée si le couple est présent dans au moins
+                {Math.round(PRESENCE_MIN * 100)} % des mois — les dépenses exceptionnelles
+                n'influencent pas la prévision. Restant = tendance − déjà dépensé ce mois-ci
+                (les couples planifiés sont exclus : pas de double comptage).
+                {isCurrentMonth && prov.total > 0 && (
+                  <> À lisser sur les {daysInMonth(sim.y, sim.m) - now.getDate()} jour(s) restant(s), réactualisé à chaque import.</>
+                )}
+              </p>
+              <div className="space-y-2">
+                {prov.lines.map((l) => (
+                  <div key={l.cat + "|" + l.sub} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs">
+                    <span className="min-w-0 truncate font-medium text-slate-700">{labelOf(l.cat, l.sub, taxo)}</span>
+                    <span className="text-slate-500">
+                      tendance {fmt(l.tendency)} · dépensé {fmt(l.spent)} ·{" "}
+                      <span className="font-semibold text-rose-600">restant {fmt(l.left)}</span>
+                    </span>
+                  </div>
+                ))}
+                {prov.lines.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
+                    {state.extras.length > 0
+                      ? "Aucune habitude non planifiée détectée pour ce mois."
+                      : "Importez un relevé pour que l'application apprenne vos habitudes."}
                   </div>
                 )}
               </div>

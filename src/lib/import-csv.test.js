@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCsv, parseFrDate, parseFrAmount, rowsToEntries, matchesPlannedExpense, matchesPlannedIncome, applyTaxoAdditions, mergeHistory, A_CLASSER } from "./import-csv.js";
+import { parseCsv, parseFrDate, parseFrAmount, rowsToEntries, matchesPlannedExpense, matchesPlannedIncome, applyTaxoAdditions, mergeHistory, mergeAddedLines, A_CLASSER } from "./import-csv.js";
 import { TAXONOMIE, catByLabel, subByLabel, subByOperation, normalizeLabel } from "./taxonomie.js";
 
 /* Extrait réel d'un relevé bancaire (CRLF, séparateur « ; », colonne vide finale). */
@@ -764,5 +764,89 @@ describe("historique réel des occurrences 🔁", () => {
     expect(merged.filter((o) => o.m === 8)).toHaveLength(2); // 850 et 870
     // un même relevé réimporté n'ajoute rien
     expect(mergeHistory(merged, obs)).toHaveLength(merged.length);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Dédoublonnage multiset au réimport (v0.21.0)                        */
+/* ------------------------------------------------------------------ */
+
+describe("mergeAddedLines (dédoublonnage au réimport)", () => {
+  const line = (over = {}) => ({
+    id: "x1", label: "Restaurant", amount: 30, day: 5, y: 2026, m: 8,
+    cat: "loisirs", sub: "restaurants", ...over,
+  });
+
+  it("réimporter un même relevé n'ajoute rien", () => {
+    const added = [line(), line({ day: 12, amount: 22 })];
+    expect(mergeAddedLines(added, added)).toHaveLength(0);
+    expect(mergeAddedLines([line()], [line()])).toHaveLength(0);
+  });
+
+  it("les vrais doublons d'un relevé (deux opérations identiques) restent distincts", () => {
+    // Deux fois -4,00 le même jour : une copie existe déjà, une seule est ajoutée.
+    const dup = line({ label: "BADS", amount: 4, sub: "alimentation", cat: "vie-quotidienne" });
+    expect(mergeAddedLines([dup], [dup, dup])).toHaveLength(1);
+    expect(mergeAddedLines([], [dup, dup])).toHaveLength(2);
+  });
+
+  it("même jour et montant, libellé différent : conservé (opérations distinctes)", () => {
+    const a = line({ label: "Chez Marcel" });
+    const b = line({ label: "Chez Léon" });
+    expect(mergeAddedLines([a], [b])).toHaveLength(1);
+  });
+
+  it("un mois nouveau du même couple est ajouté intégralement", () => {
+    expect(mergeAddedLines([line()], [line({ m: 9, day: 7 })])).toHaveLength(1);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Réimport des séries 🔁 à montant variable (v0.21.0)                 */
+/* ------------------------------------------------------------------ */
+
+describe("réimport d'une série 🔁 à montant variable", () => {
+  const row = (over = {}) => ({
+    day: 3, m: 8, y: 2026, amount: -850,
+    cat: "logement", sub: "loyers-charges", label: "Loyers, Charges",
+    ...over,
+  });
+
+  it("tous les mois déjà dans l'historique → rattachement, aucune écriture en double", () => {
+    const rows = [
+      row({ m: 6, amount: -800 }),
+      row({ m: 7, amount: -850 }),
+      row({ m: 8, amount: -900 }),
+    ];
+    const first = rowsToEntries(rows, {});
+    expect(first.newExpenses).toHaveLength(1);
+    const entry = first.newExpenses[0];
+    expect(entry.amount).toBe(900);
+    expect(entry.history).toHaveLength(3);
+
+    // Réimport du même relevé, l'écriture existe maintenant avec son historique.
+    const second = rowsToEntries(rows, { expenses: [entry] });
+    expect(second.newExpenses).toHaveLength(0); // rattachée, pas dupliquée
+    expect(second.coveredHistory).toHaveLength(1);
+    expect(second.coveredHistory[0].id).toBe(entry.id);
+    expect(second.coveredHistory[0].obs).toHaveLength(3);
+  });
+
+  it("un mois nouveau au montant inconnu reste rattaché avec synchronisation", () => {
+    const rows = [
+      row({ m: 6, amount: -800 }),
+      row({ m: 7, amount: -850 }),
+    ];
+    const first = rowsToEntries(rows, {});
+    const entry = first.newExpenses[0]; // montant prévisionnel 850
+    // Relevé suivant : le mois nouveau (septembre) porte un montant inconnu.
+    const next = rowsToEntries(
+      [row({ m: 8, day: 5, amount: -920 })],
+      { expenses: [entry] }
+    );
+    expect(next.newExpenses).toHaveLength(0);
+    const c = next.coveredHistory[0];
+    expect(c.syncAmount).toBe(true);
+    expect(c.obs).toEqual([{ day: 5, m: 8, y: 2026, amount: 920 }]);
   });
 });

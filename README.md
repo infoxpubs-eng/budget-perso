@@ -24,6 +24,7 @@ Application React de gestion de budget personnel qui répond à une question sim
   - option **13ᵉ mois en 2 fois** : ½ versée avec le salaire de juin, ½ avec celui de novembre
   - option **bonus estimé**, versé avec le salaire de mars
 - **Aperçu du mois** : solde en début de mois, revenus, dépenses, **solde actuel** (à la date d'aujourd'hui) et solde prévisionnel de fin de mois
+- **Solde de fin de mois probable** 📊 : au solde simulé s'ajoute une **provision pour habitudes non planifiées**, apprise des relevés importés — médiane des dépenses mensuelles par couple sur les 6 derniers mois complets, provisionnée si le couple est présent au moins un mois sur deux (une dépense exceptionnelle n'influence pas la prévision) ; restant du mois = tendance − déjà dépensé, réactualisé à chaque import. Détail par couple dans l'onglet « 📅 Échéancier » ; aucun revenu n'est estimé statistiquement
 - **Graphique d'évolution du solde** : courbe quotidienne du mois, survolable opération par opération
 - **Flux quotidien** : barres vertes (entrées) / rouges (sorties) par jour du mois
 - **Projection 12 mois** : solde prévisionnel de fin de mois avec report d'un mois sur l'autre
@@ -57,8 +58,10 @@ npm test          # lance la suite de tests (Vitest)
 │       ├── budget.js       # logique métier pure (simulation, agrégats) — sans React
 │       ├── taxonomie.js    # nomenclature bancaire à 2 niveaux (catégories, sous-catégories, enveloppes)
 │       ├── import-csv.js   # import de relevé bancaire CSV (parsing FR + rapprochement des catégories)
+│       ├── estimation.js    # habitudes non planifiées : tendances et provision du solde probable
 │       ├── budget.test.js  # tests unitaires Vitest de la logique métier
-│       └── import-csv.test.js  # tests unitaires Vitest de l'import CSV
+│       ├── import-csv.test.js  # tests unitaires Vitest de l'import CSV
+│       └── estimation.test.js  # tests unitaires Vitest de l'estimation des habitudes
 ├── .github/workflows/ci.yml           # CI : tests + build à chaque push
 ├── .github/workflows/deploy.yml       # déploiement GitHub Pages à chaque push sur main
 └── .github/workflows/tag-release.yml  # tag v{version} créé à chaque push sur main
@@ -113,6 +116,7 @@ Module **sans dépendance React**, donc testable isolément :
 | `parseCsv(text)` | Découpe le CSV (`;`, BOM, CRLF) en lignes ; colonnes repérées par nom (date, catégorie, sous-catégorie, montant, « Libellé opération » optionnel : déduit la sous-catégorie si inconnue) ; les couples absents de la nomenclature sont conservés avec leurs libellés d'origine (seules date et montant illisibles sont ignorés) |
 | `rowsToEntries(rows, planned?, taxo?)` | **Import guidé par la nomenclature** : un couple marqué 🔁 → des écritures récurrentes planifiées, une par **série temporelle** du couple (un montant qui varie d'un mois à l'autre reste la même série — une seule écriture au dernier montant observé ; deux prélèvements co-occurrents le même mois forment deux séries) ; sinon débits → dépenses exceptionnelles, crédits → revenus uniques ; les couples inconnus sont ajoutés dans la catégorie « À classer » (`taxoAdditions`) ; une ligne identique à une écriture planifiée est comptée dans `recurrentes` au lieu d'être importée ; une ligne 🔁 au montant inconnu est **rattachée** à l'écriture unique de son couple (`syncAmount` : son montant prévisionnel suit la dernière occurrence observée). **Historique réel** : chaque occurrence rapprochée est mémorisée avec sa date et son montant réels (`history` sur les écritures créées, `coveredHistory` pour les écritures existantes) |
 | `mergeHistory(existing, obs)` | Fusionne deux historiques d'occurrences en dédoublonnant par date et montant (réimporter un même relevé n'ajoute rien), trié par date |
+| `mergeAddedLines(existing, added)` | Déduplique par **multiset** les lignes ajoutées par un import (clé : date, couple, montant au centime, libellé) : réimporter un même relevé n'ajoute rien, les vrais doublons d'opérations restent distincts |
 | `matchesPlannedExpense`, `matchesPlannedIncome` | Rapprochement ligne / écriture planifiée (catégorie, sous-catégorie, montant ±0,01 €, fréquence) |
 | `applyTaxoAdditions(taxo, additions, choices?)` | Intègre les couples absents selon les choix du rapport d'import : catégorie d'accueil (défaut « À classer ») et renommage ; renvoie la nomenclature et le raccord des écritures vers leur nouvelle place |
 
@@ -131,10 +135,25 @@ Le modèle de données est volontairement simple :
 }
 ```
 
+## Habitudes non planifiées (`src/lib/estimation.js`)
+
+Module **sans dépendance React** qui estime, à partir des dépenses importées non planifiées
+(`extras`), ce qu'il reste à dépenser dans le mois pour les postes réels sans écriture :
+
+| Fonction | Rôle |
+|---|---|
+| `medianOf(values)` | Médiane (moyenne des deux milieux si pair, 0 si vide) |
+| `monthlySpendByCouple(extras)` | Totaux mensuels par couple « catégorie \| sous-catégorie » |
+| `coupleTendencies(extras, upto?)` | Par couple : **tendance = médiane des totaux mensuels** sur une fenêtre d'au plus `TENDENCY_WINDOW` (6) mois complets avant `upto` (mois cible), zéros inclus, provisionnée seulement si présence ≥ `PRESENCE_MIN` (50 %) ; une dépense exceptionnelle retombe à 0 |
+| `remainingProvision({ extras, expenses, y, m })` | Provision restante du mois : par couple sans écriture planifiée, `max(0, tendance − dépensé ce mois-ci)` ; aucun revenu estimé ; cold start → provision nulle |
+
+Le KPI « Solde fin de mois probable » de l'Aperçu vaut `solde simulé − provision totale` ;
+l'onglet « 📅 Échéancier » détaille chaque couple (tendance, dépensé, restant).
+
 ## Tests
 
 La suite couvre : années bissextiles, tri et signe des opérations, exclusion des dépenses annuelles hors de leur mois, clamp du jour
-31, jours de paie (dont franchissement de week-end), 13ᵉ mois en juin/novembre, bonus de mars, dépenses exceptionnelles, revenus uniques (mode `unique`), vue de mois isolé (`monthSim`), liste des mois chargés (`loadedMonths`), point d'ancrage de la simulation (`simStart`), enchaînement des soldes d'un mois à l'autre, détection de découvert, passage à l'année suivante, migration des anciennes sauvegardes (dont conversion des anciennes catégories plates), intégrité de la nomenclature bancaire, rattachement des enveloppes et agrégats incompressible/discrétionnaire ; parsing de l'import CSV (dates et montants français, BOM/CRLF, lignes invalides, rapprochement des libellés, conversion en écritures, déduction de sous-catégorie via « Libellé opération ») ; anti-doublons de l'import (dépenses récurrentes mensuelles/annuelles, consommation unique d'une écriture, revenus fixe/salaire/unique) ; **import guidé par la nomenclature** (lignes 🔁 → écritures récurrentes groupées en séries temporelles par couple, au dernier montant observé, crédits 🔁 → revenus fixes, couples inconnus conservés et ajoutés dans « À classer », rapport chargées / intégrées / ignorées) ; **rangement des couples depuis le rapport d'import** (renommage, catégorie d'accueil, rattachement aux couples existants, écritures suivant leur couple) ; modèle par récurrence guidé par la nomenclature (récurrence = motif mensuel/annuel **et** couple marqué 🔁 ; les écritures planifiées sur un couple non 🔁 restent budgétées mais sortent de l'échéancier récurrent, marquer 🔁 dans la console les y fait entrer), marqueur `rec` de chaque opération, échéancier par jour, totaux récurrents mensuels, aucun exceptionnel par défaut. **144 tests** au total, dont l'historique réel des occurrences 🔁 (stockage, fusion sans doublon au réimport) et les séries temporelles des couples 🔁 (montant variable sans écriture en double, rattachement et synchronisation du montant prévisionnel).
+31, jours de paie (dont franchissement de week-end), 13ᵉ mois en juin/novembre, bonus de mars, dépenses exceptionnelles, revenus uniques (mode `unique`), vue de mois isolé (`monthSim`), liste des mois chargés (`loadedMonths`), point d'ancrage de la simulation (`simStart`), enchaînement des soldes d'un mois à l'autre, détection de découvert, passage à l'année suivante, migration des anciennes sauvegardes (dont conversion des anciennes catégories plates), intégrité de la nomenclature bancaire, rattachement des enveloppes et agrégats incompressible/discrétionnaire ; parsing de l'import CSV (dates et montants français, BOM/CRLF, lignes invalides, rapprochement des libellés, conversion en écritures, déduction de sous-catégorie via « Libellé opération ») ; anti-doublons de l'import (dépenses récurrentes mensuelles/annuelles, consommation unique d'une écriture, revenus fixe/salaire/unique) ; **import guidé par la nomenclature** (lignes 🔁 → écritures récurrentes groupées en séries temporelles par couple, au dernier montant observé, crédits 🔁 → revenus fixes, couples inconnus conservés et ajoutés dans « À classer », rapport chargées / intégrées / ignorées) ; **rangement des couples depuis le rapport d'import** (renommage, catégorie d'accueil, rattachement aux couples existants, écritures suivant leur couple) ; modèle par récurrence guidé par la nomenclature (récurrence = motif mensuel/annuel **et** couple marqué 🔁 ; les écritures planifiées sur un couple non 🔁 restent budgétées mais sortent de l'échéancier récurrent, marquer 🔁 dans la console les y fait entrer), marqueur `rec` de chaque opération, échéancier par jour, totaux récurrents mensuels, aucun exceptionnel par défaut. **168 tests** au total, dont l'historique réel des occurrences 🔁 (stockage, fusion sans doublon au réimport), les séries temporelles des couples 🔁 (montant variable sans écriture en double, rattachement et synchronisation du montant prévisionnel), le **dédoublonnage multiset au réimport** (extras, revenus uniques, séries 🔁 rattachées à l'écriture couvrante) et l'**estimation des habitudes non planifiées** (médiane avec zéros, seuil de présence, fenêtre de 6 mois, provision restante, exclusion des couples planifiés, cold start).
 
 ```bash
 npm test            # une seule exécution
