@@ -12,6 +12,20 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.15.0] — 2026-10-03
+
+### Ajouté
+
+- **Onglet dédié « 📅 Échéancier »** (entre « Budget par catégorie » et « Admin »), en complément d'« Aperçu », « Dépenses », « Revenus »… :
+  - échéancier du mois sélectionné : chaque jour d'échéance avec ses opérations récurrentes (🔒 si incompressible), le net du jour et **le solde de fin de journée** dans la simulation ;
+  - **calendrier type des récurrents** : paiements et revenus récurrents du budget à leurs dates habituelles (jour fixe, chaque mois, chaque « mois d'une annuelle », salaire versé l'avant-veille du dernier jour ouvré) ;
+  - **table 12 mois** : pour chaque mois simulé, jours d'échéance, débits 🔁 et crédits 🔁, point bas de la trajectoire (⚠️ si négatif) et solde en fin de mois ; le mois sélectionné est surligné.
+
+### Modifié
+
+- La carte « Échéancier récurrent » de l'aperçu est déplacée vers cet onglet (l'aperçu garde le graphique 12 mois avec point bas).
+- Nouvelle fonction `recurringMonthTotals(state, y, m)` dans `budget.js` : totaux récurrents d'un mois (jours d'échéance, opérations, débits, crédits, net), exceptionnels et uniques exclus.
+
 ## [0.14.0] — 2026-10-03
 
 ### Ajouté

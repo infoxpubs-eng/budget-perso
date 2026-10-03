@@ -309,6 +309,23 @@ export function recurringSchedule(state, y, m) {
     }));
 }
 
+/**
+ * Totaux récurrents d'un mois : nombre de jours d'échéance, nombre
+ * d'opérations récurrentes, débits, crédits et net. Les opérations
+ * exceptionnelles et les revenus uniques en sont exclus.
+ */
+export function recurringMonthTotals(state, y, m) {
+  const sched = recurringSchedule(state, y, m);
+  const ops = sched.flatMap((d) => d.ops);
+  return {
+    days: sched.length,
+    count: ops.length,
+    totalOut: ops.filter((o) => o.type === "out").reduce((a, o) => a - o.amount, 0),
+    totalIn: ops.filter((o) => o.type === "in").reduce((a, o) => a + o.amount, 0),
+    net: ops.reduce((a, o) => a + o.amount, 0),
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* Simulation 12 mois                                                  */
 /* ------------------------------------------------------------------ */

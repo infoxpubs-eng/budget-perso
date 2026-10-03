@@ -30,6 +30,7 @@ import {
   isRecurringExpense,
   isRecurringIncome,
   recurringSchedule,
+  recurringMonthTotals,
 } from "./lib/budget.js";
 import {
   TAXONOMIE,
@@ -430,12 +431,18 @@ export default function App() {
 
   const yearData = sims.map((s) => ({ label: s.label, solde: s.end, bas: s.min }));
   const echeancier = useMemo(() => recurringSchedule(state, sim.y, sim.m), [state, sim]);
+  const recTotals = useMemo(() => recurringMonthTotals(state, sim.y, sim.m), [state, sim]);
+  const recYear = useMemo(
+    () => sims.map((s) => ({ label: s.label, min: s.min, minDay: s.minDay, end: s.end, ...recurringMonthTotals(state, s.y, s.m) })),
+    [state, sims]
+  );
 
   const tabs = [
     { id: "apercu", label: "Aperçu" },
     { id: "depenses", label: "Dépenses" },
     { id: "revenus", label: "Revenus" },
     { id: "budget", label: "Budget par catégorie" },
+    { id: "echeancier", label: "📅 Échéancier" },
     { id: "admin", label: "🛠️ Admin" },
   ];
 
@@ -693,42 +700,6 @@ export default function App() {
                 </div>
               </Card>
             </div>
-
-            <Card>
-              <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="font-semibold">Échéancier récurrent 🔁 — {sim.label}</h2>
-                <span className="text-xs text-slate-500">
-                  {echeancier.length} jour(s) d'échéance · {echeancier.reduce((a, d) => a + d.ops.length, 0)} opération(s) récurrente(s)
-                </span>
-              </div>
-              <p className="mb-3 text-xs text-slate-500">
-                Les dates des prélèvements et paiements récurrents sont souvent similaires d'un mois sur l'autre :
-                elles dessinent à l'avance la trajectoire du solde et les point bas des mois à venir.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {echeancier.map((d) => (
-                  <div key={d.day} className="min-w-[9rem] rounded-lg border border-slate-200 px-3 py-2 text-xs">
-                    <div className="font-semibold text-slate-700">Le {d.day}</div>
-                    {d.ops.map((op, i) => (
-                      <div key={i} className="mt-1 flex items-baseline justify-between gap-2">
-                        <span className="truncate text-slate-600">{op.label}{op.inc ? " 🔒" : ""}</span>
-                        <span className={op.type === "in" ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
-                          {op.type === "in" ? "+" : "−"}{fmt(Math.abs(op.amount))}
-                        </span>
-                      </div>
-                    ))}
-                    <div className={"mt-1 border-t border-slate-100 pt-1 font-semibold " + (d.total >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                      Net : {d.total >= 0 ? "+" : "−"}{fmt(Math.abs(d.total))}
-                    </div>
-                  </div>
-                ))}
-                {echeancier.length === 0 && (
-                  <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
-                    Aucune échéance récurrente ce mois-ci.
-                  </div>
-                )}
-              </div>
-            </Card>
           </div>
         )}
 
@@ -994,6 +965,130 @@ export default function App() {
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
+                </div>
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {/* ------------------------------ ÉCHÉANCIER ------------------------------ */}
+        {tab === "echeancier" && (
+          <div className="space-y-6">
+            <Card>
+              <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="font-semibold">Échéancier récurrent 🔁 — {sim.label}</h2>
+                <span className="text-xs text-slate-500">
+                  {recTotals.days} jour(s) d'échéance · {recTotals.count} opération(s) · débits − {fmt(recTotals.totalOut)} · crédits + {fmt(recTotals.totalIn)}
+                </span>
+              </div>
+              <p className="mb-3 text-xs text-slate-500">
+                Les dates des prélèvements et paiements récurrents sont souvent similaires d'un mois sur l'autre :
+                elles dessinent à l'avance la trajectoire du solde et les point bas des mois à venir.
+                Le solde indiqué est celui de fin de journée dans la simulation du mois.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {echeancier.map((d) => (
+                  <div key={d.day} className="min-w-[10rem] rounded-lg border border-slate-200 px-3 py-2 text-xs">
+                    <div className="font-semibold text-slate-700">Le {d.day}</div>
+                    {d.ops.map((op, i) => (
+                      <div key={i} className="mt-1 flex items-baseline justify-between gap-2">
+                        <span className="truncate text-slate-600">{op.label}{op.inc ? " 🔒" : ""}</span>
+                        <span className={op.type === "in" ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
+                          {op.type === "in" ? "+" : "−"}{fmt(Math.abs(op.amount))}
+                        </span>
+                      </div>
+                    ))}
+                    <div className={"mt-1 border-t border-slate-100 pt-1 font-semibold " + (d.total >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                      Net : {d.total >= 0 ? "+" : "−"}{fmt(Math.abs(d.total))}
+                    </div>
+                    <div className="mt-0.5 text-slate-400">Solde : {fmt(sim.daily[d.day]?.solde ?? sim.end)}</div>
+                  </div>
+                ))}
+                {echeancier.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
+                    Aucune échéance récurrente ce mois-ci.
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card>
+                <h2 className="mb-1 font-semibold">Calendrier type des récurrents</h2>
+                <p className="mb-3 text-xs text-slate-500">
+                  Paiements et revenus récurrents du budget, à leurs dates habituelles (les mois courts ramènent le jour 31 en fin de mois).
+                </p>
+                <div className="space-y-2">
+                  {[
+                    ...state.expenses.filter(isRecurringExpense).map((e) => ({
+                      key: e.id,
+                      label: e.label,
+                      amount: -e.amount,
+                      day: e.day,
+                      when: e.freq === "annuelle" ? "Chaque " + MONTHS[(e.month ?? 1) - 1].toLowerCase() : "Chaque mois",
+                      inc: !!e.incompressible,
+                    })),
+                    ...state.incomes.filter(isRecurringIncome).map((i) => ({
+                      key: i.id,
+                      label: i.label + (i.treizieme ? " (½ 13ᵉ mois en juin + nov.)" : "") + ((i.bonus ?? 0) > 0 ? " (bonus en mars)" : ""),
+                      amount: i.amount,
+                      day: i.mode === "salaire" ? salaryPayDay(sim.y, sim.m) : (i.day ?? 1),
+                      when: i.mode === "salaire" ? "Avant-veille du dernier jour ouvré" : "Jour fixe du mois",
+                      inc: false,
+                    })),
+                  ]
+                    .sort((a, b) => a.day - b.day)
+                    .map((r) => (
+                      <div key={r.key} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-xs">
+                        <div className="min-w-0">
+                          <span className="truncate font-medium text-slate-700">{r.label}</span>
+                          <span className="text-slate-500"> · le {r.day} · {r.when}</span>
+                        </div>
+                        <span className={r.amount >= 0 ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
+                          {r.amount >= 0 ? "+" : "−"}{fmt(Math.abs(r.amount))}{r.inc ? " 🔒" : ""}
+                        </span>
+                      </div>
+                    ))}
+                  {state.expenses.length + state.incomes.filter(isRecurringIncome).length === 0 && (
+                    <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
+                      Aucun récurrent enregistré.
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              <Card>
+                <h2 className="mb-1 font-semibold">12 mois — échéances récurrentes et point bas</h2>
+                <p className="mb-3 text-xs text-slate-500">
+                  Pour chaque mois simulé : débits et crédits récurrents uniquement, puis point bas de la trajectoire (suivant ces dates stables) et solde en fin de mois.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-500">
+                        <th className="py-1.5 pr-2 font-medium">Mois</th>
+                        <th className="py-1.5 pr-2 font-medium text-right">Éch.</th>
+                        <th className="py-1.5 pr-2 font-medium text-right">Débits 🔁</th>
+                        <th className="py-1.5 pr-2 font-medium text-right">Crédits 🔁</th>
+                        <th className="py-1.5 pr-2 font-medium text-right">Point bas</th>
+                        <th className="py-1.5 font-medium text-right">Fin de mois</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recYear.map((r, i) => (
+                        <tr key={i} className={"border-b border-slate-100" + (r.label === sim.label ? " bg-indigo-50/50" : "")}>
+                          <td className="py-1.5 pr-2 font-medium text-slate-700">{r.label}</td>
+                          <td className="py-1.5 pr-2 text-right text-slate-500">{r.days} j</td>
+                          <td className="py-1.5 pr-2 text-right text-rose-600">− {fmt(r.totalOut)}</td>
+                          <td className="py-1.5 pr-2 text-right text-emerald-600">+ {fmt(r.totalIn)}</td>
+                          <td className={"py-1.5 pr-2 text-right font-semibold " + (r.min < 0 ? "text-rose-600" : "text-amber-600")}>
+                            {fmt(r.min)}{r.min < 0 ? " ⚠️" : ""}
+                          </td>
+                          <td className={"py-1.5 text-right font-semibold " + (r.end < 0 ? "text-rose-600" : "text-slate-700")}>{fmt(r.end)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </Card>
             </div>

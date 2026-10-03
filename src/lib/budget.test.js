@@ -18,6 +18,7 @@ import {
   isRecurringExpense,
   isRecurringIncome,
   recurringSchedule,
+  recurringMonthTotals,
 } from "./budget.js";
 import {
   TAXONOMIE,
@@ -907,4 +908,26 @@ describe("récurrence du modèle", () => {
     expect(s.extras).toEqual([]);
     expect(s.incomes).toEqual([]);
   });
+
+  it("recurringMonthTotals agrège les récurrents du mois et exclut l'exceptionnel", () => {
+    const state = baseState(); // Loyer -800 le 3, Courses -200 le 15, Salaire fixe +2000 le 27
+    state.extras.push({ id: "x1", label: "Réparation voiture", amount: 400, day: 20, y: 2026, m: 0, cat: "exceptionnelles" });
+    state.incomes.push({ id: "i2", label: "Remboursement", amount: 1.35, mode: "unique", day: 10, y: 2026, m: 0, cat: "services-financiers", sub: "remboursement-frais" });
+    const t = recurringMonthTotals(state, 2026, 0);
+    expect(t.days).toBe(3);
+    expect(t.count).toBe(3);
+    expect(t.totalOut).toBe(1000);
+    expect(t.totalIn).toBe(2000);
+    expect(t.net).toBe(1000);
+  });
+
+  it("recurringMonthTotals ne compte la dépense annuelle que dans son mois", () => {
+    const state = baseState(); // Vacances -900 en juillet
+    const jan = recurringMonthTotals(state, 2026, 0);
+    const juil = recurringMonthTotals(state, 2026, 6);
+    expect(jan.count).toBe(3);
+    expect(juil.count).toBe(4);
+    expect(juil.totalOut).toBe(1900);
+  });
 });
+
