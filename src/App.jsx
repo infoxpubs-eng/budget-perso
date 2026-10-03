@@ -48,9 +48,8 @@ import {
   renameSubcategory,
   setCategoryActive,
   setSubActive,
-  slugify,
 } from "./lib/taxonomie.js";
-import { parseCsv, rowsToEntries, A_CLASSER } from "./lib/import-csv.js";
+import { parseCsv, rowsToEntries, applyTaxoAdditions, A_CLASSER } from "./lib/import-csv.js";
 
 /* ============================== Données initiales ============================== */
 
@@ -229,6 +228,8 @@ export default function App() {
   const [onlyLoaded, setOnlyLoaded] = useState(false);
   const fileRef = useRef(null);
   const csvRef = useRef(null);
+  // Rapport d'import CSV en attente de confirmation (dialogue dédié)
+  const [csvImport, setCsvImport] = useState(null);
 
   // ----- Persistance : chargement au démarrage -----
   useEffect(() => {
@@ -367,8 +368,9 @@ export default function App() {
   // ----- Import d'un relevé bancaire CSV, piloté par la nomenclature -----
   // Les couples catégorie / sous-catégorie du relevé sont rapprochés de la
   // nomenclature : leurs paramètres (récurrente 🔁, incompressible 🔒)
-  // déterminent comment chaque ligne est intégrée. Les couples absents sont
-  // ajoutés dans la catégorie « À classer », rien n'est perdu.
+  // déterminent comment chaque ligne est intégrée. Le rapport s'affiche dans
+  // un dialogue : les couples absents de la nomenclature y sont rangés dans
+  // une catégorie (défaut « À classer ») et renommés avant confirmation.
   const importCsvFile = (file) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -379,66 +381,53 @@ export default function App() {
         alert("Fichier CSV non reconnu : " + e.message);
         return;
       }
+      if (parsed.rows.length === 0) {
+        alert("Aucune ligne exploitable trouvée dans ce fichier." + (parsed.ignored ? " " + parsed.ignored + " ligne(s) illisible(s)." : ""));
+        return;
+      }
       const r = rowsToEntries(parsed.rows, state, state.taxonomie);
-      const chargees = parsed.rows.length + parsed.ignored;
-      const integrees = r.couvertesOut + r.couvertesIn + r.extras.length + r.incomes.length + r.recurrentes.length;
-      const lignes = [];
-      if (r.newExpenses.length) {
-        lignes.push(
-          r.newExpenses.length + " écriture(s) récurrente(s) planifiée(s) :\\n" +
-          r.newExpenses.map((e) => "  · " + e.label + " — " + fmt(e.amount) + " le " + e.day + " du mois" + (e.incompressible ? " 🔒" : "")).join("\\n")
-        );
-      }
-      if (r.newIncomes.length) {
-        lignes.push(
-          r.newIncomes.length + " revenu(s) récurrent(s) planifié(s) :\\n" +
-          r.newIncomes.map((i) => "  · " + i.label + " — " + fmt(i.amount) + " le " + i.day + " du mois").join("\\n")
-        );
-      }
-      if (r.extras.length) {
-        lignes.push(r.extras.length + " dépense(s) exceptionnelle(s), total " + fmt(r.depensesTotal));
-      }
-      if (r.incomes.length) {
-        lignes.push(r.incomes.length + " revenu(s) unique(s), total " + fmt(r.revenusTotal));
-      }
-      if (r.recurrentes.length) {
-        lignes.push(r.recurrentes.length + " ligne(s) déjà couverte(s) par une écriture planifiée (non importées en double)");
-      }
-      if (r.taxoAdditions.length) {
-        lignes.push(
-          r.taxoAdditions.length + " couple(s) ajouté(s) dans « À classer » :\\n" +
-          r.taxoAdditions.map((a) => "  · " + a.label + (a.nature === "revenu" ? " (revenu)" : " (dépense)")).join("\\n")
-        );
-      }
-      const msg =
-        "Import du relevé :\\n" +
-        chargees + " ligne(s) chargée(s) · " + integrees + " intégrée(s) · " + parsed.ignored + " ignorée(s)\\n\\n" +
-        (lignes.length ? lignes.join("\\n") + "\\n\\n" : "") +
-        "Continuer ?";
-      if (window.confirm(msg)) {
-        setState((s) => {
-          let taxo = s.taxonomie;
-          if (r.taxoAdditions.length) {
-            if (!taxo.some((c) => c.id === A_CLASSER)) {
-              taxo = addCategory(taxo, { label: "À classer", nature: "depense", env: "exceptionnelles" });
-            }
-            for (const a of r.taxoAdditions) {
-              if (!taxSub(A_CLASSER, slugify(a.label), taxo)) {
-                taxo = addSubcategory(taxo, A_CLASSER, { label: a.label, nature: a.nature });
-              }
-            }
-          }
-          return {
-            ...s,
-            taxonomie: taxo,
-            expenses: [...s.expenses, ...r.newExpenses],
-            incomes: [...s.incomes, ...r.newIncomes, ...r.incomes],
-            extras: [...s.extras, ...r.extras],
-          };
-        });
-      }
+      setCsvImport({ parsed, r, choices: r.taxoAdditions.map(() => ({})) });
     };
     reader.readAsText(file);
+  };
+
+  // Met à jour le choix d'un couple à ranger : catégorie cible / libellé.
+  const setCsvChoice = (i, patch) => {
+    setCsvImport((s) => {
+      if (!s) return s;
+      const choices = [...s.choices];
+      choices[i] = { ...choices[i], ...patch };
+      return { ...s, choices };
+    });
+  };
+
+  // Applique l'import confirmé : les couples absents sont intégrés selon les
+  // choix (défaut « À classer »), et les écritures importées qui référencent
+  // ces couples sont raccordées à leur nouvelle place.
+  const confirmCsvImport = () => {
+    const imp = csvImport;
+    if (!imp) return;
+    const { r, choices } = imp;
+    setState((s) => {
+      let taxo = s.taxonomie;
+      let mapping = [];
+      if (r.taxoAdditions.length) {
+        ({ taxo, mapping } = applyTaxoAdditions(s.taxonomie, r.taxoAdditions, choices));
+      }
+      const remap = (x) => {
+        if (x.cat !== A_CLASSER) return x;
+        const m = mapping.find((mm) => mm.from === A_CLASSER + "|" + x.sub);
+        return m ? { ...x, cat: m.cat, sub: m.sub, label: m.label } : x;
+      };
+      return {
+        ...s,
+        taxonomie: taxo,
+        expenses: [...s.expenses, ...r.newExpenses.map(remap)],
+        incomes: [...s.incomes, ...r.newIncomes.map(remap), ...r.incomes.map(remap)],
+        extras: [...s.extras, ...r.extras.map(remap)],
+      };
+    });
+    setCsvImport(null);
   };
 
   const resetData = () => {
@@ -1138,6 +1127,125 @@ export default function App() {
 
         {/* ------------------------------ ADMIN ------------------------------ */}
         {tab === "admin" && <AdminPanel state={state} setState={setState} />}
+
+        {/* ----------------------- DIALOGUE IMPORT CSV ----------------------- */}
+        {csvImport && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl bg-white p-6 shadow-xl">
+              <h2 className="text-lg font-semibold">Import du relevé</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {csvImport.parsed.rows.length + csvImport.parsed.ignored} ligne(s) chargée(s) ·{" "}
+                {csvImport.r.couvertesOut +
+                  csvImport.r.couvertesIn +
+                  csvImport.r.extras.length +
+                  csvImport.r.incomes.length +
+                  csvImport.r.recurrentes.length}{" "}
+                intégrée(s) · {csvImport.parsed.ignored} ignorée(s)
+              </p>
+
+              <div className="mt-4 flex-1 space-y-2 overflow-y-auto text-sm">
+                {csvImport.r.newExpenses.length > 0 && (
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <div className="font-medium text-slate-700">
+                      {csvImport.r.newExpenses.length} écriture(s) récurrente(s) planifiée(s)
+                    </div>
+                    <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
+                      {csvImport.r.newExpenses.map((e) => (
+                        <li key={e.id}>
+                          · {e.label} — {fmt(e.amount)} le {e.day} du mois{e.incompressible ? " 🔒" : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {csvImport.r.newIncomes.length > 0 && (
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <div className="font-medium text-slate-700">
+                      {csvImport.r.newIncomes.length} revenu(s) récurrent(s) planifié(s)
+                    </div>
+                    <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
+                      {csvImport.r.newIncomes.map((x) => (
+                        <li key={x.id}>· {x.label} — {fmt(x.amount)} le {x.day} du mois</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {csvImport.r.extras.length > 0 && (
+                  <div className="rounded-lg bg-slate-50 p-3 text-slate-700">
+                    {csvImport.r.extras.length} dépense(s) exceptionnelle(s), total {fmt(csvImport.r.depensesTotal)}
+                  </div>
+                )}
+                {csvImport.r.incomes.length > 0 && (
+                  <div className="rounded-lg bg-slate-50 p-3 text-slate-700">
+                    {csvImport.r.incomes.length} revenu(s) unique(s), total {fmt(csvImport.r.revenusTotal)}
+                  </div>
+                )}
+                {csvImport.r.recurrentes.length > 0 && (
+                  <div className="rounded-lg bg-slate-50 p-3 text-slate-700">
+                    {csvImport.r.recurrentes.length} ligne(s) déjà couverte(s) par une écriture planifiée (non
+                    importées en double)
+                  </div>
+                )}
+
+                {csvImport.r.taxoAdditions.length > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <div className="font-semibold text-amber-800">
+                      {csvImport.r.taxoAdditions.length} couple(s) absent(s) de la nomenclature
+                    </div>
+                    <p className="mt-1 text-xs text-amber-700">
+                      Rangez chaque couple dans une catégorie (défaut « À classer ») et renommez-le si besoin ;
+                      les écritures correspondantes suivront.
+                    </p>
+                    <div className="mt-2 space-y-2">
+                      {csvImport.r.taxoAdditions.map((a, i) => (
+                        <div key={i} className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-medium text-slate-600">
+                            {a.label} · {a.nature === "revenu" ? "revenu" : "dépense"} →
+                          </span>
+                          <input
+                            type="text"
+                            className={inputCls + " min-w-[8rem] flex-1"}
+                            value={csvImport.choices[i]?.label ?? a.label}
+                            onChange={(e) => setCsvChoice(i, { label: e.target.value })}
+                            title="Libellé du couple"
+                          />
+                          <select
+                            className={inputCls}
+                            value={csvImport.choices[i]?.cat ?? A_CLASSER}
+                            onChange={(e) => setCsvChoice(i, { cat: e.target.value })}
+                            title="Catégorie d'accueil"
+                          >
+                            <option value={A_CLASSER}>À classer</option>
+                            {(a.nature === "revenu"
+                              ? taxo.filter((c) => c.active !== false && c.nature === "revenu")
+                              : taxo.filter((c) => c.active !== false && c.nature === "depense")
+                            )
+                              .filter((c) => c.id !== A_CLASSER)
+                              .map((c) => (
+                                <option key={c.id} value={c.id}>{c.label}</option>
+                              ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button className={btnCls} onClick={() => setCsvImport(null)}>
+                  Annuler
+                </button>
+                <button
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                  onClick={confirmCsvImport}
+                >
+                  Importer
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

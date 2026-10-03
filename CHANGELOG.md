@@ -12,6 +12,21 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.17.0] — 2026-10-03
+
+### Ajouté
+
+- **Rangement des couples « À classer » depuis le rapport d'import** : le rapport d'import CSV devient un vrai dialogue (plus de fenêtre `confirm`) ; chaque couple absent de la nomenclature y est présenté avec :
+  - un champ **libellé** (renommage avant intégration) ;
+  - un sélecteur de **catégorie d'accueil** (défaut « À classer », ou n'importe quelle catégorie de sa nature, dépense ou revenu) ;
+  - les écritures importées qui référencent le couple suivent automatiquement leur nouvelle place ;
+  - un couple déjà existant dans la catégorie cible sous le même libellé n'est pas recréé : les écritures s'y rattachent.
+- Nouvelle fonction pure `applyTaxoAdditions(taxo, additions, choices?)` dans `import-csv.js` : intègre les couples selon les choix (`{ cat, label }` par couple) et renvoie la nomenclature mise à jour avec le raccord `mapping` des écritures.
+
+### Modifié
+
+- `importCsvFile` ouvre le dialogue au lieu de `window.confirm` ; la confirmation (`confirmCsvImport`) applique le rapport complet — écritures récurrentes, exceptionnelles, revenus — avec les couples rangés.
+
 ## [0.16.0] — 2026-10-03
 
 ### Ajouté

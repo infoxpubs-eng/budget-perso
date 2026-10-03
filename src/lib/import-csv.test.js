@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseCsv, parseFrDate, parseFrAmount, rowsToEntries, matchesPlannedExpense, matchesPlannedIncome } from "./import-csv.js";
-import { catByLabel, subByLabel, subByOperation, normalizeLabel } from "./taxonomie.js";
+import { parseCsv, parseFrDate, parseFrAmount, rowsToEntries, matchesPlannedExpense, matchesPlannedIncome, applyTaxoAdditions, A_CLASSER } from "./import-csv.js";
+import { TAXONOMIE, catByLabel, subByLabel, subByOperation, normalizeLabel } from "./taxonomie.js";
 
 /* Extrait réel d'un relevé bancaire (CRLF, séparateur « ; », colonne vide finale). */
 const SAMPLE =
@@ -480,4 +480,74 @@ describe("import guidé par la nomenclature (v0.16.0)", () => {
     expect(r.newExpenses[0].incompressible).toBe(true);
     expect(r.extras).toHaveLength(0);
   });
+});
+
+/* ------------------------------------------------------------------ */
+/* Rangement des couples « À classer » depuis le rapport (v0.17.0)     */
+/* ------------------------------------------------------------------ */
+
+describe("applyTaxoAdditions (v0.17.0)", () => {
+  it("sans choix : crée « À classer » et y ajoute les couples", () => {
+    const additions = [{ label: "Autre", nature: "depense" }];
+    const { taxo, mapping } = applyTaxoAdditions(TAXONOMIE, additions);
+    const cat = taxo.find((c) => c.id === A_CLASSER);
+    expect(cat).toBeDefined();
+    expect(cat.subs.map((s) => s.id)).toEqual(["autre"]);
+    expect(mapping).toEqual([{ from: "a-classer|autre", cat: "a-classer", sub: "autre", label: "Autre" }]);
+  });
+
+  it("range un couple dans une catégorie existante, avec renommage", () => {
+    const additions = [{ label: "Sortie kayak", nature: "depense" }];
+    const { taxo, mapping } = applyTaxoAdditions(TAXONOMIE, additions, [{ cat: "loisirs", label: "Sports nautiques" }]);
+    const loisirs = taxo.find((c) => c.id === "loisirs");
+    expect(loisirs.subs.some((s) => s.label === "Sports nautiques")).toBe(true);
+    expect(taxo.find((c) => c.id === A_CLASSER)).toBeUndefined();
+    expect(mapping).toEqual([{ from: "a-classer|sortie-kayak", cat: "loisirs", sub: "sports-nautiques", label: "Sports nautiques" }]);
+  });
+
+  it("se rattache à une sous-catégorie existante du même libellé sans la recréer", () => {
+    const additions = [{ label: "Alimentation mystère", nature: "depense" }];
+    const { taxo, mapping } = applyTaxoAdditions(TAXONOMIE, additions, [{ cat: "vie-quotidienne", label: "Alimentation" }]);
+    const cat = taxo.find((c) => c.id === "vie-quotidienne");
+    expect(cat.subs.filter((s) => s.label === "Alimentation")).toHaveLength(1);
+    expect(mapping[0].sub).toBe("alimentation");
+  });
+
+  it("se rattache à un libellé déjà présent sous un id suffixé, sans recréer", () => {
+    // Cas d'une nomenclature où « Autres » existe déjà avec un id suffixé.
+    const taxo = [{ id: "loisirs", label: "Loisirs", nature: "depense", env: "loisirs", subs: [
+      { id: "autres-2", label: "Autres", recurring: false, incompressible: false },
+    ] }];
+    const additions = [{ label: "AUTRE", nature: "depense" }];
+    const { taxo: out, mapping } = applyTaxoAdditions(taxo, additions, [{ cat: "loisirs", label: "Autres" }]);
+    const cat = out.find((c) => c.id === "loisirs");
+    expect(cat.subs).toHaveLength(1); // rien de recréé
+    expect(mapping[0].sub).toBe("autres-2");
+  });
+
+  it("les écritures importées suivent le couple rangé (raccord via mapping)", () => {
+    const base = migrateBase();
+    const csv =
+      "Date transaction;Date comptabilisation;Catégorie;Sous-Catégorie;Montant;Pointée;\n" +
+      "30/09/2026;30/09/2026;Catégorie Mystère;Autre;-10,00;Non;\n";
+    const { rows } = parseCsv(csv);
+    const r = rowsToEntries(rows, base);
+    expect(r.taxoAdditions).toEqual([{ label: "Autre", nature: "depense" }]);
+    const { taxo, mapping } = applyTaxoAdditions(TAXONOMIE, r.taxoAdditions, [{ cat: "loisirs", label: "Divers loisirs" }]);
+    // L'écriture référencait a-classer|autre : elle est raccordée au couple créé.
+    const m = mapping.find((x) => x.from === "a-classer|autre");
+    expect(r.extras[0].cat).toBe("a-classer");
+    expect(r.extras[0].sub).toBe("autre");
+    const remap = (x) => (x.cat === "a-classer" && m && "a-classer|" + x.sub === m.from ? { ...x, cat: m.cat, sub: m.sub, label: m.label } : x);
+    const extra = remap(r.extras[0]);
+    expect(extra.cat).toBe("loisirs");
+    expect(extra.sub).toBe("divers-loisirs");
+    expect(extra.label).toBe("Divers loisirs");
+    // La nomenclature contient bien le nouveau couple.
+    expect(taxo.find((c) => c.id === "loisirs").subs.some((s) => s.id === "divers-loisirs")).toBe(true);
+  });
+
+  function migrateBase() {
+    return { soldeDepart: 1500, expenses: [], incomes: [], extras: [] };
+  }
 });

@@ -35,7 +35,7 @@
  * Module sans dépendance React : testable isolément (voir import-csv.test.js).
  */
 
-import { TAXONOMIE, catByLabel, subByLabel, subByOperation, slugify, subIncompressible } from "./taxonomie.js";
+import { TAXONOMIE, catByLabel, subByLabel, subByOperation, slugify, subIncompressible, addCategory, addSubcategory, taxSub, normalizeLabel } from "./taxonomie.js";
 
 /* ------------------------------------------------------------------ */
 /* Analyse CSV                                                          */
@@ -405,6 +405,46 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
     depensesTotal,
     revenusTotal,
   };
+}
+
+/**
+ * Intègre les couples absents de la nomenclature (`taxoAdditions`) — pure.
+ * Chaque couple peut être rangé dans une catégorie choisie et renommé :
+ * `choices[i] = { cat?: string, label?: string }` (défaut : « À classer » et
+ * le libellé d'origine). Un couple existant déjà dans la catégorie cible sous
+ * le même libellé n'est pas recréé — les lignes s'y rattachent.
+ *
+ * @returns {{ taxo: Array, mapping: Array<{from:string,cat:string,sub:string,label:string}> }}
+ *           `mapping[i].from` vaut `A_CLASSER + "|" + slugify(libellé d'origine)` :
+ *           les écritures importées qui référencent le couple y sont rattachées.
+ */
+export function applyTaxoAdditions(taxo, additions, choices = []) {
+  let next = taxo;
+  const mapping = [];
+  for (let i = 0; i < additions.length; i++) {
+    const a = additions[i];
+    const cat = (choices[i] && choices[i].cat) || A_CLASSER;
+    const label = String((choices[i] && choices[i].label) || a.label).trim();
+    if (cat === A_CLASSER && !next.some((c) => c.id === A_CLASSER)) {
+      next = addCategory(next, { label: A_CLASSER_LABEL, nature: "depense", env: "exceptionnelles" });
+    }
+    let sub = taxSub(cat, slugify(label), next);
+    if (!sub) {
+      // Même libellé sous un id suffixé (créé autrement) : s'y rattacher.
+      const c0 = next.find((x) => x.id === cat);
+      sub = c0 && c0.subs.find((s) => normalizeLabel(s.label) === normalizeLabel(label));
+    }
+    if (!sub) {
+      next = addSubcategory(next, cat, { label, nature: a.nature });
+      const c = next.find((x) => x.id === cat);
+      // addSubcategory suffixe l'id en cas de collision : cherche par libellé.
+      sub = c && c.subs.find((s) => s.label === label);
+    }
+    if (sub) {
+      mapping.push({ from: A_CLASSER + "|" + slugify(a.label), cat, sub: sub.id, label });
+    }
+  }
+  return { taxo: next, mapping };
 }
 
 /**
