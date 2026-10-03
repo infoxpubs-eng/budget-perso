@@ -15,20 +15,27 @@
  *   quand la colonne Sous-Catégorie est inconnue (recherche par inclusion
  *   dans le libellé d'opération). L'intitulé des écritures reste le libellé
  *   simple : sous-catégorie, sinon catégorie.
- * - Les lignes dont la catégorie est inconnue (ou la date / le montant
- *   illisibles) sont ignorées et comptées.
+ * - Seules les lignes à date ou montant illisible (ou nul) sont ignorées :
+ *   les couples catégorie / sous-catégorie absents de la nomenclature sont
+ *   conservés puis ajoutés dans la catégorie « À classer » à la conversion.
+ * - C'est la nomenclature qui pilote l'import (voir rowsToEntries) : les
+ *   paramètres du couple — marqueurs « récurrente 🔁 » et « incompressible
+ *   🔒 » — déterminent comment chaque ligne est intégrée.
  * - Les lignes correspondant à des écritures déjà planifiées (dépenses
  *   récurrentes, revenus) ne sont pas importées en double : elles sont
- *   comptées dans `recurrentes` (voir rowsToEntries).
+ *   comptées dans `recurrentes`.
  *
  * Chaque ligne devient :
- *   - dépense  → une dépense exceptionnelle (date précise) ;
- *   - revenu   → un revenu unique (mode "unique", versé une seule fois).
+ *   - couple marqué 🔁 → une écriture récurrente planifiée, une seule par
+ *     couple et montant (jour type = jour le plus fréquent) ; les lignes du
+ *     relevé couvertes ne sont pas importées en double ;
+ *   - sinon, dépense  → une dépense exceptionnelle (date précise) ;
+ *   - sinon, revenu   → un revenu unique (mode "unique", versé une seule fois).
  *
  * Module sans dépendance React : testable isolément (voir import-csv.test.js).
  */
 
-import { TAXONOMIE, catByLabel, subByLabel, subByOperation, taxCat, taxSub } from "./taxonomie.js";
+import { TAXONOMIE, catByLabel, subByLabel, subByOperation, slugify, subIncompressible } from "./taxonomie.js";
 
 /* ------------------------------------------------------------------ */
 /* Analyse CSV                                                          */
@@ -136,20 +143,26 @@ export function parseCsv(text, taxo = TAXONOMIE) {
         (opLabel !== "" ? subByOperation(cat.id, opLabel, taxo) : undefined))
       : undefined;
 
-    if (!date || amount === undefined || amount === 0 || !cat) {
+    if (!date || amount === undefined || amount === 0) {
       ignored++;
-      if (catLabel && !cat) inconnues.add(catLabel);
       continue;
     }
+
+    // Catégorie du relevé inconnue : la ligne est conservée avec ses
+    // libellés d'origine — le couple sera ajouté dans « À classer » à la
+    // conversion (rowsToEntries), rien n'est perdu.
+    if (!cat && catLabel) inconnues.add(catLabel);
 
     rows.push({
       day: date.day,
       m: date.m,
       y: date.y,
       amount,
-      cat: cat.id,
+      cat: cat ? cat.id : undefined,
       sub: sub ? sub.id : undefined,
-      label: sub ? sub.label : cat.label,
+      label: sub ? sub.label : catLabel,
+      catLabel,
+      subLabel,
     });
   }
 
@@ -166,31 +179,115 @@ function newId() {
   return "csv-" + Date.now().toString(36) + "-" + seq;
 }
 
+/** Identifiant de la catégorie d'accueil des couples absents de la nomenclature. */
+export const A_CLASSER = "a-classer";
+/** Libellé de la catégorie d'accueil des couples absents de la nomenclature. */
+export const A_CLASSER_LABEL = "À classer";
+
 /**
- * Convertit les lignes analysées en entrées du modèle :
- * montants négatifs → dépenses exceptionnelles (extras), positifs → revenus uniques.
- *
- * `planned` (optionnel) décrit les écritures déjà planifiées dans l'état
- * (`{ expenses, incomes }`). Toute ligne du relevé qui correspond à une
- * écriture planifiée (même catégorie/sous-catégorie, même montant à 0,01 €
- * près, mois compatible avec la fréquence) n'est PAS importée : elle est
- * comptée dans `recurrentes` pour éviter un doublon dans le budget.
- *
- * @returns {{ extras: Array, incomes: Array, recurrentes: Array<{label:string,amount:number,kind:"depense"|"revenu"}>,
- *            depensesTotal: number, revenusTotal: number }}
+ * Valeur la plus fréquente d'un tableau (la première insérée l'emporte en
+ * cas d'égalité) — jour type d'un prélèvement récurrent, par exemple.
  */
-export function rowsToEntries(rows, planned = {}) {
+function modeOf(values) {
+  const counts = new Map();
+  let best;
+  let n = 0;
+  for (const v of values) {
+    const c = (counts.get(v) ?? 0) + 1;
+    counts.set(v, c);
+    if (c > n) {
+      n = c;
+      best = v;
+    }
+  }
+  return best;
+}
+
+/** Le couple (catégorie, sous-catégorie) est-il marqué récurrent 🔁 dans la nomenclature ? */
+function subIsRecurring(cat, sub, taxo) {
+  if (!cat || !sub) return false;
+  return !!taxo.find((c) => c.id === cat)?.subs.find((s) => s.id === sub)?.recurring;
+}
+
+/**
+ * Convertit les lignes analysées en entrées du modèle. C'est la nomenclature
+ * qui pilote l'import : les paramètres du couple catégorie / sous-catégorie
+ * déterminent comment chaque ligne est intégrée.
+ *
+ * - Couple marqué 🔁 (récurrent) → une écriture récurrente planifiée, une
+ *   seule par couple et montant (jour type = jour le plus fréquent des
+ *   occurrences ; incompressible 🔒 repris de la nomenclature). Les lignes
+ *   du relevé ainsi couvertes ne sont PAS importées en double. Une ligne
+ *   🔁 déjà couverte par une écriture planifiée (catégorie, sous-catégorie,
+ *   montant à 0,01 € près) est comptée dans `recurrentes`.
+ * - Sinon, débit → dépense exceptionnelle ; crédit → revenu unique.
+ * - Une ligne non 🔁 correspondant à une écriture déjà planifiée (même
+ *   catégorie/sous-catégorie, même montant à 0,01 € près, mois compatible
+ *   avec la fréquence) n'est pas importée : comptée dans `recurrentes`
+ *   (chaque écriture planifiée consommée une seule fois).
+ * - Couple catégorie / sous-catégorie absent de la nomenclature (catégorie
+ *   inconnue, ou sous-catégorie introuvable) : le couple est ajouté dans
+ *   `taxoAdditions` (à intégrer dans la catégorie « À classer ») et la ligne
+ *   référence ce couple — rien n'est ignoré.
+ *
+ * @param {Array} rows lignes analysées (voir parseCsv)
+ * @param {{expenses?:Array,incomes?:Array}} planned écritures déjà planifiées
+ * @param {Array} taxo nomenclature (paramètres des couples)
+ *
+ * @returns {{ extras: Array, incomes: Array,
+ *             recurrentes: Array<{label:string,amount:number,kind:"depense"|"revenu"}>,
+ *             newExpenses: Array, newIncomes: Array,
+ *             taxoAdditions: Array<{label:string,nature:"depense"|"revenu"}>,
+ *             couvertesOut: number, couvertesIn: number,
+ *             depensesTotal: number, revenusTotal: number }}
+ */
+export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
   const expenses = planned.expenses ?? [];
   const incomesPlanned = planned.incomes ?? [];
   const extras = [];
   const incomes = [];
   const recurrentes = [];
+  const newExpenses = [];
+  const newIncomes = [];
+  const taxoAdditions = [];
   let depensesTotal = 0;
   let revenusTotal = 0;
+  let couvertesOut = 0;
+  let couvertesIn = 0;
   const usedExpenses = new Set();
   const usedIncomes = new Set();
-  for (const r of rows) {
+  const addedCouples = new Set();
+
+  // Couples absents de la nomenclature → « À classer » (dédupliqués par libellé).
+  const resolved = rows.map((r) => {
+    if (r.cat !== undefined && (r.sub !== undefined || !r.subLabel)) return r;
+    const label = String((r.subLabel || r.catLabel || "").trim());
+    if (!label) return r; // pas d'information de couple : ligne telle quelle
+    const kk = label.toLowerCase();
+    if (!addedCouples.has(kk)) {
+      addedCouples.add(kk);
+      taxoAdditions.push({ label, nature: r.amount < 0 ? "depense" : "revenu" });
+    }
+    return { ...r, cat: A_CLASSER, sub: slugify(label), label };
+  });
+
+  // Prélèvements récurrents 🔁 : groupés par couple et montant (en centimes).
+  const groupsOut = new Map();
+  const groupsIn = new Map();
+
+  for (const r of resolved) {
     if (r.amount < 0) {
+      if (subIsRecurring(r.cat, r.sub, taxo)) {
+        const x = expenses.find((x) => matchesPlannedExpense(r, x));
+        if (x) {
+          recurrentes.push({ label: x.label, amount: -r.amount, kind: "depense" });
+          continue;
+        }
+        const key = r.cat + "|" + r.sub + "|" + Math.round(-r.amount * 100);
+        if (!groupsOut.has(key)) groupsOut.set(key, []);
+        groupsOut.get(key).push(r);
+        continue;
+      }
       const e = expenses.find(
         (x) => !usedExpenses.has(x.id) && matchesPlannedExpense(r, x)
       );
@@ -211,6 +308,17 @@ export function rowsToEntries(rows, planned = {}) {
       });
       depensesTotal += -r.amount;
     } else {
+      if (subIsRecurring(r.cat, r.sub, taxo)) {
+        const x = incomesPlanned.find((x) => matchesPlannedIncome(r, x));
+        if (x) {
+          recurrentes.push({ label: x.label, amount: r.amount, kind: "revenu" });
+          continue;
+        }
+        const key = r.cat + "|" + r.sub + "|" + Math.round(r.amount * 100);
+        if (!groupsIn.has(key)) groupsIn.set(key, []);
+        groupsIn.get(key).push(r);
+        continue;
+      }
       const i = incomesPlanned.find(
         (x) => !usedIncomes.has(x.id) && matchesPlannedIncome(r, x)
       );
@@ -233,7 +341,70 @@ export function rowsToEntries(rows, planned = {}) {
       revenusTotal += r.amount;
     }
   }
-  return { extras, incomes, recurrentes, depensesTotal, revenusTotal };
+
+  // Une écriture récurrente par groupe (couple + montant). Plusieurs montants
+  // pour un même couple → une écriture chacun, avec le montant en suffixe.
+  const couplesOut = new Map();
+  for (const key of groupsOut.keys()) {
+    const ck = key.split("|").slice(0, 2).join("|");
+    couplesOut.set(ck, (couplesOut.get(ck) ?? 0) + 1);
+  }
+  for (const [key, rs] of groupsOut) {
+    const [cat, sub, cents] = key.split("|");
+    const amount = Number(cents) / 100;
+    const label =
+      (couplesOut.get(cat + "|" + sub) ?? 0) > 1
+        ? rs[0].label + " · " + amount.toFixed(2).replace(".", ",") + " €"
+        : rs[0].label;
+    newExpenses.push({
+      id: newId(),
+      label,
+      amount,
+      day: modeOf(rs.map((x) => x.day)),
+      cat,
+      sub,
+      freq: "mensuelle",
+      incompressible: subIncompressible(cat, sub, taxo),
+    });
+    couvertesOut += rs.length;
+  }
+
+  const couplesIn = new Map();
+  for (const key of groupsIn.keys()) {
+    const ck = key.split("|").slice(0, 2).join("|");
+    couplesIn.set(ck, (couplesIn.get(ck) ?? 0) + 1);
+  }
+  for (const [key, rs] of groupsIn) {
+    const [cat, sub, cents] = key.split("|");
+    const amount = Number(cents) / 100;
+    const label =
+      (couplesIn.get(cat + "|" + sub) ?? 0) > 1
+        ? rs[0].label + " · " + amount.toFixed(2).replace(".", ",") + " €"
+        : rs[0].label;
+    newIncomes.push({
+      id: newId(),
+      label,
+      amount,
+      mode: "fixe",
+      day: modeOf(rs.map((x) => x.day)),
+      cat,
+      sub,
+    });
+    couvertesIn += rs.length;
+  }
+
+  return {
+    extras,
+    incomes,
+    recurrentes,
+    newExpenses,
+    newIncomes,
+    taxoAdditions,
+    couvertesOut,
+    couvertesIn,
+    depensesTotal,
+    revenusTotal,
+  };
 }
 
 /**

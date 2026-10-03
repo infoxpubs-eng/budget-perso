@@ -93,7 +93,7 @@ describe("parseCsv", () => {
     expect(rows).toHaveLength(7);
   });
 
-  it("ignore les lignes à catégorie inconnue, date ou montant illisibles", () => {
+  it("n'ignore que les lignes illisibles et conserve les couples inconnus", () => {
     const csv =
       "Date transaction;Date comptabilisation;Catégorie;Sous-Catégorie;Montant;Pointée;\n" +
       "30/09/2026;30/09/2026;Catégorie Mystère;Autre;-10,00;Non;\n" +
@@ -102,12 +102,17 @@ describe("parseCsv", () => {
       "30/09/2026;30/09/2026;Loisirs;Restaurants, bars, discothèques…;0,00;Non;\n" +
       "01/10/2026;01/10/2026;Virements reçus;;250,00;Oui;\n";
     const { rows, ignored, categoriesInconnues } = parseCsv(csv);
-    expect(rows).toHaveLength(1);
-    expect(ignored).toBe(4);
+    expect(rows).toHaveLength(2);
+    expect(ignored).toBe(3);
     expect(categoriesInconnues).toEqual(["Catégorie Mystère"]);
-    expect(rows[0].cat).toBe("virements-recus");
+    // Le couple inconnu est conservé avec ses libellés d'origine.
+    expect(rows[0].cat).toBeUndefined();
     expect(rows[0].sub).toBeUndefined();
-    expect(rows[0].label).toBe("Virements reçus");
+    expect(rows[0].catLabel).toBe("Catégorie Mystère");
+    expect(rows[0].subLabel).toBe("Autre");
+    expect(rows[1].cat).toBe("virements-recus");
+    expect(rows[1].sub).toBeUndefined();
+    expect(rows[1].label).toBe("Virements reçus");
   });
 
   it("rejette un CSV sans les colonnes attendues", () => {
@@ -123,24 +128,36 @@ describe("parseCsv", () => {
 describe("rowsToEntries", () => {
   it("route les débits vers des dépenses exceptionnelles, les crédits vers des revenus uniques", () => {
     const { rows } = parseCsv(SAMPLE);
-    const { extras, incomes, depensesTotal, revenusTotal } = rowsToEntries(rows);
-    expect(extras).toHaveLength(5);
-    expect(incomes).toHaveLength(2);
-    expect(depensesTotal).toBeCloseTo(131.71);
-    expect(revenusTotal).toBeCloseTo(2.7);
+    const r = rowsToEntries(rows);
+    // Téléphonie 🔁 → écriture récurrente planifiée (1 ligne).
+    // Frais bancaires 🔁🔒 : 1,35 € ×2 → un groupe ; 1,34 € → un groupe.
+    expect(r.newExpenses).toHaveLength(3);
+    expect(r.couvertesOut).toBe(4);
+    // Solidarité : seule dépense non récurrente du relevé.
+    expect(r.extras).toHaveLength(1);
+    expect(r.extras[0].amount).toBe(105);
+    expect(r.extras[0].cat).toBe("cadeaux-solidarite");
+    expect(r.extras[0].sub).toBe("solidarite");
+    expect(r.depensesTotal).toBeCloseTo(105);
+    // Remboursements de frais : sous-catégorie non 🔁 → revenus uniques.
+    expect(r.incomes).toHaveLength(2);
+    expect(r.incomes[0].mode).toBe("unique");
+    expect(r.incomes[0].amount).toBe(1.35);
+    expect(r.incomes[0].cat).toBe("services-financiers");
+    expect(r.revenusTotal).toBeCloseTo(2.7);
+    expect(r.recurrentes).toHaveLength(0);
 
-    const e = extras[0];
-    expect(e.amount).toBe(22.67); // montant stocké positif
-    expect(e.day).toBe(30);
-    expect(e.y).toBe(2026);
-    expect(e.m).toBe(8);
-    expect(e.cat).toBe("abonnements");
-    expect(e.sub).toBe("telephonie");
-
-    const i = incomes[0];
-    expect(i.mode).toBe("unique");
-    expect(i.amount).toBe(1.35);
-    expect(i.cat).toBe("services-financiers");
+    const t = r.newExpenses[0];
+    expect(t.amount).toBe(22.67);
+    expect(t.day).toBe(30);
+    expect(t.cat).toBe("abonnements");
+    expect(t.sub).toBe("telephonie");
+    expect(t.freq).toBe("mensuelle");
+    expect(t.incompressible).toBe(false);
+    const f1 = r.newExpenses[1];
+    expect(f1.amount).toBeCloseTo(1.35);
+    expect(f1.incompressible).toBe(true);
+    expect(r.newExpenses[2].amount).toBeCloseTo(1.34);
   });
 });
 
@@ -161,18 +178,25 @@ describe("rowsToEntries — écritures déjà planifiées", () => {
   };
 
   it("ne double pas une dépense récurrente déjà planifiée", () => {
-    const { extras, recurrentes, depensesTotal } = rowsToEntries([row()], { expenses: [loyer] });
+    const { extras, recurrentes, newExpenses, depensesTotal } = rowsToEntries([row()], { expenses: [loyer] });
     expect(extras).toHaveLength(0);
+    expect(newExpenses).toHaveLength(0);
     expect(recurrentes).toEqual([{ label: "Loyer", amount: 850, kind: "depense" }]);
     expect(depensesTotal).toBe(0);
   });
 
-  it("importe une dépense récurrente dont le montant diffère", () => {
+  it("importe une dépense 🔁 dont le montant diffère comme écriture récurrente", () => {
     const elec = { ...loyer, id: "e2", sub: "energie", amount: 95 };
-    const { extras, recurrentes } = rowsToEntries([row({ amount: -101.34, sub: "energie" })], { expenses: [elec] });
+    const { extras, recurrentes, newExpenses, couvertesOut } = rowsToEntries(
+      [row({ amount: -101.34, sub: "energie" })],
+      { expenses: [elec] }
+    );
     expect(recurrentes).toHaveLength(0);
-    expect(extras).toHaveLength(1);
-    expect(extras[0].amount).toBeCloseTo(101.34);
+    expect(extras).toHaveLength(0);
+    expect(newExpenses).toHaveLength(1);
+    expect(newExpenses[0].amount).toBeCloseTo(101.34);
+    expect(newExpenses[0].incompressible).toBe(true); // 🔒 repris de la nomenclature
+    expect(couvertesOut).toBe(1);
   });
 
   it("respecte le mois prévu d'une dépense annuelle", () => {
@@ -186,11 +210,23 @@ describe("rowsToEntries — écritures déjà planifiées", () => {
   });
 
   it("consomme chaque écriture planifiée une seule fois", () => {
+    // Restaurants : sous-catégorie non 🔁 → comportement historique.
+    const resto = (n) => ({ id: "r" + n, label: "Resto " + n, amount: 220, day: 5, cat: "loisirs", sub: "restaurants", freq: "mensuelle" });
+    const ligne = () => row({ amount: -220, cat: "loisirs", sub: "restaurants", label: "Restaurants, bars, discothèques…" });
+    const r = rowsToEntries([ligne(), ligne(), ligne()], { expenses: [resto(1), resto(2)] });
+    expect(r.recurrentes).toHaveLength(2);
+    expect(r.extras).toHaveLength(1);
+    expect(r.newExpenses).toHaveLength(0);
+  });
+
+  it("une ligne 🔁 couverte par une écriture planifiée est comptée, jamais doublée", () => {
+    // Alimentation 🔁 : les 3 lignes matchent l'une des deux écritures planifiées.
     const courses = (n) => ({ id: "c" + n, label: "Courses " + n, amount: 220, day: 5, cat: "vie-quotidienne", sub: "alimentation", freq: "mensuelle" });
     const ligne = () => row({ amount: -220, cat: "vie-quotidienne", sub: "alimentation" });
     const r = rowsToEntries([ligne(), ligne(), ligne()], { expenses: [courses(1), courses(2)] });
-    expect(r.recurrentes).toHaveLength(2);
-    expect(r.extras).toHaveLength(1);
+    expect(r.recurrentes).toHaveLength(3);
+    expect(r.extras).toHaveLength(0);
+    expect(r.newExpenses).toHaveLength(0);
   });
 
   it("ne double pas un revenu déjà planifié (mode fixe)", () => {
@@ -214,16 +250,26 @@ describe("rowsToEntries — écritures déjà planifiées", () => {
     const unique = { id: "i3", label: "Prime", amount: 500, mode: "unique", day: 15, y: 2026, m: 8 };
     const memeMois = rowsToEntries([row({ amount: 500 })], { incomes: [unique] });
     expect(memeMois.recurrentes).toHaveLength(1);
+    expect(memeMois.newIncomes).toHaveLength(0);
     const autreMois = rowsToEntries([row({ amount: 500, m: 9 })], { incomes: [unique] });
     expect(autreMois.recurrentes).toHaveLength(0);
-    expect(autreMois.incomes).toHaveLength(1);
+    expect(autreMois.incomes).toHaveLength(0);
+    // Loyers-charges 🔁 : crédit hors écriture planifiée → revenu récurrent.
+    expect(autreMois.newIncomes).toHaveLength(1);
+    expect(autreMois.newIncomes[0].mode).toBe("fixe");
+    expect(autreMois.couvertesIn).toBe(1);
   });
 
-  it("sans écritures planifiées, rien n'est rapproché (recurrentes vide)", () => {
-    const { recurrentes, extras, incomes } = rowsToEntries([row()]);
+  it("sans écritures planifiées, une ligne 🔁 devient une écriture récurrente", () => {
+    const { recurrentes, extras, incomes, newExpenses, couvertesOut } = rowsToEntries([row()]);
     expect(recurrentes).toHaveLength(0);
-    expect(extras).toHaveLength(1);
+    expect(extras).toHaveLength(0);
     expect(incomes).toHaveLength(0);
+    expect(newExpenses).toHaveLength(1);
+    expect(newExpenses[0].amount).toBe(850);
+    expect(newExpenses[0].freq).toBe("mensuelle");
+    expect(newExpenses[0].incompressible).toBe(true);
+    expect(couvertesOut).toBe(1);
   });
 });
 
@@ -321,5 +367,117 @@ describe("subByOperation", () => {
     expect(subByOperation("vie-quotidienne", "AUCUN RAPPORT ICI")).toBeUndefined();
     expect(subByOperation("cat-inconnue", "ALIMENTATION")).toBeUndefined();
     expect(subByOperation("vie-quotidienne", "")).toBeUndefined();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Import guidé par la nomenclature (v0.16.0)                           */
+/* ------------------------------------------------------------------ */
+
+describe("import guidé par la nomenclature (v0.16.0)", () => {
+  const row = (over = {}) => ({
+    day: 3, m: 8, y: 2026, amount: -850,
+    cat: "logement", sub: "loyers-charges", label: "Loyers, Charges",
+    ...over,
+  });
+
+  it("groupe les lignes 🔁 d'un couple : une écriture, jour le plus fréquent", () => {
+    const lignes = [
+      row({ day: 3 }),
+      row({ day: 3 }),
+      row({ day: 15 }),
+      row({ day: 7 }),
+    ];
+    const r = rowsToEntries(lignes);
+    expect(r.newExpenses).toHaveLength(1);
+    expect(r.couvertesOut).toBe(4);
+    expect(r.newExpenses[0].day).toBe(3); // jour le plus fréquent
+    expect(r.newExpenses[0].amount).toBe(850);
+    expect(r.extras).toHaveLength(0);
+  });
+
+  it("plusieurs montants pour un même couple → une écriture chacun, montant en suffixe", () => {
+    const lignes = [
+      row({ amount: -95.5, day: 5 }),
+      row({ amount: -95.5, day: 5 }),
+      row({ amount: -120, day: 12 }),
+    ];
+    const r = rowsToEntries(lignes);
+    expect(r.newExpenses).toHaveLength(2);
+    expect(r.couvertesOut).toBe(3);
+    const labels = r.newExpenses.map((e) => e.label).sort();
+    expect(labels).toEqual([
+      "Loyers, Charges · 120,00 €",
+      "Loyers, Charges · 95,50 €",
+    ]);
+    // Le groupe à montant unique garde le libellé simple.
+    const simple = rowsToEntries([row({ amount: -120 })]);
+    expect(simple.newExpenses[0].label).toBe("Loyers, Charges");
+  });
+
+  it("un crédit 🔁 devient un revenu récurrent planifié en mode fixe", () => {
+    const salaire = row({
+      amount: 2500, cat: "revenus-travail", sub: "salaire-fixe",
+      label: "Salaire fixe", day: 28,
+    });
+    const r = rowsToEntries([salaire, { ...salaire, day: 27 }]);
+    expect(r.newIncomes).toHaveLength(1);
+    expect(r.couvertesIn).toBe(2);
+    expect(r.incomes).toHaveLength(0);
+    expect(r.newIncomes[0].mode).toBe("fixe");
+    expect(r.newIncomes[0].amount).toBe(2500);
+    expect(r.newIncomes[0].day).toBe(28);
+    expect(r.newIncomes[0].cat).toBe("revenus-travail");
+    expect(r.newIncomes[0].sub).toBe("salaire-fixe");
+  });
+
+  it("catégorie inconnue → couple conservé et ajouté dans « À classer »", () => {
+    const csv =
+      "Date transaction;Date comptabilisation;Catégorie;Sous-Catégorie;Montant;Pointée;\n" +
+      "30/09/2026;30/09/2026;Catégorie Mystère;Autre;-10,00;Non;\n" +
+      "30/09/2026;30/09/2026;Catégorie Mystère;Autre;-20,00;Non;\n";
+    const { rows } = parseCsv(csv);
+    const r = rowsToEntries(rows);
+    expect(r.taxoAdditions).toEqual([{ label: "Autre", nature: "depense" }]);
+    // Les deux lignes référencent le couple ajouté, sans être récurrentes.
+    expect(r.extras).toHaveLength(2);
+    expect(r.extras.every((e) => e.cat === "a-classer")).toBe(true);
+    expect(r.extras.every((e) => e.sub === "autre")).toBe(true);
+  });
+
+  it("sous-catégorie inconnue d'une catégorie connue → couple ajouté aussi", () => {
+    const csv =
+      "Date transaction;Date comptabilisation;Catégorie;Sous-Catégorie;Montant;Pointée;\n" +
+      "30/09/2026;30/09/2026;Loisirs;Sortie kayak;-42,00;Non;\n";
+    const { rows } = parseCsv(csv);
+    const r = rowsToEntries(rows);
+    expect(r.taxoAdditions).toEqual([{ label: "Sortie kayak", nature: "depense" }]);
+    expect(r.extras).toHaveLength(1);
+    expect(r.extras[0].cat).toBe("a-classer");
+    expect(r.extras[0].sub).toBe("sortie-kayak");
+  });
+
+  it("dédoublonne les couples « À classer » par libellé, la nature du premier l'emporte", () => {
+    const csv =
+      "Date transaction;Date comptabilisation;Catégorie;Sous-Catégorie;Montant;Pointée;\n" +
+      "30/09/2026;30/09/2026;Divers;Divers;-10,00;Non;\n" +
+      "01/10/2026;01/10/2026;Divers;divers;50,00;Non;\n";
+    const { rows } = parseCsv(csv);
+    const r = rowsToEntries(rows);
+    expect(r.taxoAdditions).toEqual([{ label: "Divers", nature: "depense" }]);
+    expect(r.extras).toHaveLength(1); // débit → dépense exceptionnelle
+    expect(r.incomes).toHaveLength(1); // crédit → revenu unique
+    expect(r.extras[0].sub).toBe(r.incomes[0].sub); // même couple référence
+  });
+
+  it("un couple « À classer » marqué récurrent après coup ne casse pas l'import", () => {
+    // Nomenclature personnalisée : « À classer » existe déjà avec un couple 🔁.
+    const taxo = [{ id: "a-classer", label: "À classer", nature: "depense", subs: [
+      { id: "autre", label: "Autre", recurring: true, incompressible: true },
+    ] }];
+    const r = rowsToEntries([row({ cat: undefined, sub: undefined, catLabel: "Mystère", subLabel: "Autre" })], {}, taxo);
+    expect(r.newExpenses).toHaveLength(1);
+    expect(r.newExpenses[0].incompressible).toBe(true);
+    expect(r.extras).toHaveLength(0);
   });
 });

@@ -48,8 +48,9 @@ import {
   renameSubcategory,
   setCategoryActive,
   setSubActive,
+  slugify,
 } from "./lib/taxonomie.js";
-import { parseCsv, rowsToEntries } from "./lib/import-csv.js";
+import { parseCsv, rowsToEntries, A_CLASSER } from "./lib/import-csv.js";
 
 /* ============================== Données initiales ============================== */
 
@@ -363,7 +364,11 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // ----- Import d'un relevé bancaire CSV (débit = dépense, crédit = revenu unique) -----
+  // ----- Import d'un relevé bancaire CSV, piloté par la nomenclature -----
+  // Les couples catégorie / sous-catégorie du relevé sont rapprochés de la
+  // nomenclature : leurs paramètres (récurrente 🔁, incompressible 🔒)
+  // déterminent comment chaque ligne est intégrée. Les couples absents sont
+  // ajoutés dans la catégorie « À classer », rien n'est perdu.
   const importCsvFile = (file) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -374,27 +379,63 @@ export default function App() {
         alert("Fichier CSV non reconnu : " + e.message);
         return;
       }
-      if (parsed.rows.length === 0) {
-        alert("Aucune ligne exploitable trouvée dans ce fichier." + (parsed.categoriesInconnues.length ? "\nCatégories inconnues : " + parsed.categoriesInconnues.join(", ") : ""));
-        return;
+      const r = rowsToEntries(parsed.rows, state, state.taxonomie);
+      const chargees = parsed.rows.length + parsed.ignored;
+      const integrees = r.couvertesOut + r.couvertesIn + r.extras.length + r.incomes.length + r.recurrentes.length;
+      const lignes = [];
+      if (r.newExpenses.length) {
+        lignes.push(
+          r.newExpenses.length + " écriture(s) récurrente(s) planifiée(s) :\\n" +
+          r.newExpenses.map((e) => "  · " + e.label + " — " + fmt(e.amount) + " le " + e.day + " du mois" + (e.incompressible ? " 🔒" : "")).join("\\n")
+        );
       }
-      const { extras, incomes, recurrentes, depensesTotal, revenusTotal } = rowsToEntries(parsed.rows, state);
+      if (r.newIncomes.length) {
+        lignes.push(
+          r.newIncomes.length + " revenu(s) récurrent(s) planifié(s) :\\n" +
+          r.newIncomes.map((i) => "  · " + i.label + " — " + fmt(i.amount) + " le " + i.day + " du mois").join("\\n")
+        );
+      }
+      if (r.extras.length) {
+        lignes.push(r.extras.length + " dépense(s) exceptionnelle(s), total " + fmt(r.depensesTotal));
+      }
+      if (r.incomes.length) {
+        lignes.push(r.incomes.length + " revenu(s) unique(s), total " + fmt(r.revenusTotal));
+      }
+      if (r.recurrentes.length) {
+        lignes.push(r.recurrentes.length + " ligne(s) déjà couverte(s) par une écriture planifiée (non importées en double)");
+      }
+      if (r.taxoAdditions.length) {
+        lignes.push(
+          r.taxoAdditions.length + " couple(s) ajouté(s) dans « À classer » :\\n" +
+          r.taxoAdditions.map((a) => "  · " + a.label + (a.nature === "revenu" ? " (revenu)" : " (dépense)")).join("\\n")
+        );
+      }
       const msg =
-        "Import du relevé :\n" +
-        extras.length + " dépense(s) nouvelle(s), total " + fmt(depensesTotal) + "\n" +
-        incomes.length + " revenu(s) unique(s), total " + fmt(revenusTotal) + "\n" +
-        (recurrentes.length
-          ? recurrentes.length + " ligne(s) déjà planifiée(s) (dépenses récurrentes ou revenus existants, non importées en double)\n"
-          : "") +
-        parsed.ignored + " ligne(s) ignorée(s)" +
-        (parsed.categoriesInconnues.length ? "\nCatégories inconnues : " + parsed.categoriesInconnues.join(", ") : "") +
-        "\n\nLes nouvelles dépenses deviennent des dépenses exceptionnelles à leur date réelle ; les nouveaux revenus des entrées uniques. Continuer ?";
+        "Import du relevé :\\n" +
+        chargees + " ligne(s) chargée(s) · " + integrees + " intégrée(s) · " + parsed.ignored + " ignorée(s)\\n\\n" +
+        (lignes.length ? lignes.join("\\n") + "\\n\\n" : "") +
+        "Continuer ?";
       if (window.confirm(msg)) {
-        setState((s) => ({
-          ...s,
-          extras: [...s.extras, ...extras],
-          incomes: [...s.incomes, ...incomes],
-        }));
+        setState((s) => {
+          let taxo = s.taxonomie;
+          if (r.taxoAdditions.length) {
+            if (!taxo.some((c) => c.id === A_CLASSER)) {
+              taxo = addCategory(taxo, { label: "À classer", nature: "depense", env: "exceptionnelles" });
+            }
+            for (const a of r.taxoAdditions) {
+              if (!taxSub(A_CLASSER, slugify(a.label), taxo)) {
+                taxo = addSubcategory(taxo, A_CLASSER, { label: a.label, nature: a.nature });
+              }
+            }
+          }
+          return {
+            ...s,
+            taxonomie: taxo,
+            expenses: [...s.expenses, ...r.newExpenses],
+            incomes: [...s.incomes, ...r.newIncomes, ...r.incomes],
+            extras: [...s.extras, ...r.extras],
+          };
+        });
       }
     };
     reader.readAsText(file);

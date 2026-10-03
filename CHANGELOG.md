@@ -12,6 +12,22 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.16.0] — 2026-10-03
+
+### Ajouté
+
+- **Import CSV guidé par la nomenclature** : ce sont les couples catégorie / sous-catégorie du relevé qui pilotent l'intégration, et leurs paramètres qui décident —
+  - une ligne dont le couple est marqué « récurrente 🔁 » devient une **écriture récurrente planifiée** (dépense mensuelle ou revenu en mode fixe), une seule par couple et montant, au jour le plus fréquent du relevé ; le marqueur « incompressible 🔒 » est repris de la nomenclature ; les lignes ainsi couvertes ne sont pas importées en double ;
+  - plusieurs montants pour un même couple 🔁 → une écriture chacun, avec le montant en suffixe du libellé ;
+  - crédits 🔁 → **revenus récurrents** (mode fixe), plus d'exceptionnels par défaut à l'import.
+- **Catégorie « À classer »** : tout couple catégorie / sous-catégorie absent de la nomenclature (catégorie inconnue ou sous-catégorie introuvable) est conservé et ajouté dans « À classer » à la confirmation — rien n'est ignoré, la nature (dépense / revenu) est déduite du signe du montant.
+- **Rapport d'import** : lignes chargées / intégrées / ignorées, avec le détail des écritures récurrentes créées, des dépenses exceptionnelles, des revenus uniques, des lignes déjà couvertes et des couples ajoutés dans « À classer ».
+
+### Modifié
+
+- `parseCsv` ne rejette plus les catégories inconnues : la ligne est conservée avec ses libellés d'origine (`catLabel` / `subLabel`) ; seules les dates et montants illisibles (ou nuls) sont ignorés.
+- `rowsToEntries(rows, planned, taxo)` prend la nomenclature en troisième paramètre et retourne `newExpenses` / `newIncomes` (écritures planifiées créées), `taxoAdditions` (couples à ajouter), `couvertesOut` / `couvertesIn` (lignes couvertes) en plus des sorties historiques.
+
 ## [0.15.0] — 2026-10-03
 
 ### Ajouté
