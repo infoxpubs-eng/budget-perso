@@ -11,6 +11,8 @@ import {
   migrateState,
   transactionsOfMonth,
   simulate,
+  monthSim,
+  loadedMonths,
   monthlyExpenses,
 } from "./budget.js";
 import {
@@ -465,5 +467,50 @@ describe("taxonomie bancaire", () => {
       expect(taxCat(v.cat)).toBeTruthy();
       expect(taxSub(v.cat, v.sub)).toBeTruthy();
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* monthSim / loadedMonths (v0.8.0)                                    */
+/* ------------------------------------------------------------------ */
+
+describe("monthSim", () => {
+  it("produit exactement le premier mois de simulate()", () => {
+    const sims = simulate(baseState(), 2026, 0);
+    const m = monthSim(baseState(), 2026, 0, baseState().soldeDepart);
+    expect(m).toEqual(sims[0]);
+  });
+
+  it("chaîne un mois isolé au solde d'ouverture fourni", () => {
+    const m = monthSim(baseState(), 2026, 0, 500);
+    expect(m.start).toBe(500);
+    expect(m.end).toBe(1500); // 500 − loyer 800 − courses 200 + salaire 2000
+  });
+
+  it("un mois sans écriture ne change pas le solde", () => {
+    const m = monthSim({ soldeDepart: 0, expenses: [], incomes: [], extras: [], budgets: {} }, 2026, 4, 123.45);
+    expect(m.end).toBeCloseTo(123.45);
+    expect(m.tx).toHaveLength(0);
+  });
+});
+
+describe("loadedMonths", () => {
+  it("liste sans doublon les mois avec dépense exceptionnelle ou revenu unique, triés", () => {
+    const st = baseState();
+    st.extras = [
+      { id: "x1", label: "A", amount: 10, day: 2, y: 2026, m: 8 },
+      { id: "x2", label: "B", amount: 20, day: 3, y: 2026, m: 8 },
+      { id: "x3", label: "C", amount: 30, day: 4, y: 2025, m: 11 },
+    ];
+    st.incomes = [...st.incomes, { id: "u1", label: "Prime", amount: 100, mode: "unique", day: 5, y: 2026, m: 11 }];
+    expect(loadedMonths(st)).toEqual([
+      { y: 2025, m: 11 },
+      { y: 2026, m: 8 },
+      { y: 2026, m: 11 },
+    ]);
+  });
+
+  it("retourne une liste vide sans données chargées", () => {
+    expect(loadedMonths(baseState())).toEqual([]);
   });
 });

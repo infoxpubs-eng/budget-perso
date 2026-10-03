@@ -12,6 +12,20 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Historique réel vs prévisionnel
 - Alertes d'échéance (notifications en amont des gros débits)
 
+## [0.8.0] — 2026-10-03
+
+### Ajouté
+
+- **Sélecteur de mois filtrable sur les mois chargés** 🧾 : un bouton « Mois chargés » restreint le menu déroulant aux mois contenant des données chargées (dépense exceptionnelle ou revenu unique, typiquement importés d'un relevé) ; les mois chargés sont marqués 🧾 dans la liste
+  - Les mois chargés **hors de la fenêtre de 12 mois** (ex. un relevé du mois précédent importé après coup) apparaissent désormais dans le sélecteur, annotés « (hors fenêtre) », et s'affichent comme n'importe quel mois (solde d'ouverture = solde de départ)
+  - Les flèches ← → naviguent dans la liste filtrée ; repli automatique sur la liste complète si aucun mois n'est chargé
+- **Identification des sous-catégories récurrentes** dans les formulaires de dépense (récurrente et exceptionnelle) : les sous-catégories déjà couvertes par une dépense récurrente sont marquées « · récurrente » (avec 🔒 si incompressible), et un avertissement rappelle combien de dépenses récurrentes la couvrent et leurs libellés
+- Nouvelles fonctions dans `budget.js` : `monthSim(state, y, m, opening)` (vue d'un mois isolé, même forme que `simulate()`), `loadedMonths(state)` (mois chargés, triés, sans doublon) ; `simulate()` refactoré pour réutiliser `monthSim`
+
+### Tests
+
+- 5 nouveaux tests (77 au total) : `monthSim` identique au premier mois de `simulate()`, chaînage du solde, mois vide, liste des mois chargés (tri, doublons, revenus uniques) et liste vide
+
 ## [0.7.0] — 2026-10-03
 
 ### Modifié

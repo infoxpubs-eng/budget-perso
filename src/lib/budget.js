@@ -240,49 +240,77 @@ export function transactionsOfMonth(state, y, m) {
  * @property {Array}  tx         opérations du mois (triées par jour)
  * @property {Array}  daily      série quotidienne : { day, solde, date, events }
  */
+/**
+ * Vue d'un mois isolé — même forme qu'un élément de simulate(). Le solde
+ * d'ouverture est fourni : chaîné par simulate() d'un mois sur l'autre, ou
+ * solde de départ pour un mois affiché seul (ex. mois chargé hors de la
+ * fenêtre de 12 mois).
+ */
+export function monthSim(state, y, m, opening) {
+  const dim = daysInMonth(y, m);
+  const tx = transactionsOfMonth(state, y, m);
+  const daily = [];
+  let bal = opening;
+  let totalIn = 0;
+  let totalOut = 0;
+  let min = opening;
+  let minDay = 0;
+  daily.push({ day: 0, solde: bal, date: "1er " + MONTHS[m], events: [] });
+  for (let day = 1; day <= dim; day++) {
+    const events = tx.filter((t) => t.day === day);
+    for (const e of events) {
+      bal += e.amount;
+      if (e.type === "in") totalIn += e.amount;
+      else totalOut += -e.amount;
+    }
+    daily.push({ day, solde: bal, date: day + " " + MONTHS[m], events });
+    if (bal < min) {
+      min = bal;
+      minDay = day;
+    }
+  }
+  return {
+    y,
+    m,
+    label: monthLabel(y, m),
+    start: opening,
+    end: bal,
+    min,
+    minDay,
+    totalIn,
+    totalOut,
+    tx,
+    daily,
+  };
+}
+
+/**
+ * Mois « chargés » : ceux qui contiennent au moins une dépense
+ * exceptionnelle ou un revenu unique (données typiquement importées d'un
+ * relevé CSV). Liste triée du plus ancien au plus récent, sans doublon.
+ */
+export function loadedMonths(state) {
+  const byKey = new Map();
+  const add = (y, m) => {
+    if (y !== undefined && m !== undefined) byKey.set(y + "-" + m, { y, m });
+  };
+  for (const x of state.extras ?? []) add(x.y, x.m);
+  for (const i of state.incomes ?? []) if (i.mode === "unique") add(i.y, i.m);
+  return [...byKey.values()].sort((a, b) => a.y - b.y || a.m - b.m);
+}
+
+/**
+ * Simulation de 12 mois enchaînés à partir du mois de départ. Chaque mois
+ * est produit par monthSim() ; le solde de fin d'un mois ouvre le suivant.
+ */
 export function simulate(state, startY, startM) {
   const out = [];
   let carry = state.soldeDepart;
   for (let k = 0; k < 12; k++) {
     const d = new Date(startY, startM + k, 1);
-    const y = d.getFullYear();
-    const m = d.getMonth();
-    const dim = daysInMonth(y, m);
-    const tx = transactionsOfMonth(state, y, m);
-    const daily = [];
-    let bal = carry;
-    let totalIn = 0;
-    let totalOut = 0;
-    let min = carry;
-    let minDay = 0;
-    daily.push({ day: 0, solde: bal, date: "1er " + MONTHS[m], events: [] });
-    for (let day = 1; day <= dim; day++) {
-      const events = tx.filter((t) => t.day === day);
-      for (const e of events) {
-        bal += e.amount;
-        if (e.type === "in") totalIn += e.amount;
-        else totalOut += -e.amount;
-      }
-      daily.push({ day, solde: bal, date: day + " " + MONTHS[m], events });
-      if (bal < min) {
-        min = bal;
-        minDay = day;
-      }
-    }
-    out.push({
-      y,
-      m,
-      label: monthLabel(y, m),
-      start: carry,
-      end: bal,
-      min,
-      minDay,
-      totalIn,
-      totalOut,
-      tx,
-      daily,
-    });
-    carry = bal;
+    const month = monthSim(state, d.getFullYear(), d.getMonth(), carry);
+    out.push(month);
+    carry = month.end;
   }
   return out;
 }

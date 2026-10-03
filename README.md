@@ -7,6 +7,8 @@ Application React de gestion de budget personnel qui répond à une question sim
 
 - **Nomenclature bancaire à 2 niveaux** : chaque dépense est classée par **catégorie** (Logement, Vie quotidienne, Loisirs, Voyages et Transports, Santé, Abonnements et téléphonie, Services financiers, Impôts et Taxes, Auto et Moto, Cadeaux et solidarité, Emprunts, Dépenses d'épargne, Frais professionnels, Virements, Retraits, Mouvements internes…) et **sous-catégorie** (issue du relevé bancaire)
 - **Import de relevé bancaire CSV** 🧾 : fichier d'export `Date transaction;…;Catégorie;Sous-Catégorie;Montant;Pointée;` (colonne optionnelle `Libellé opération` : aide à déduire la sous-catégorie quand elle est inconnue ; l'intitulé des écritures reste le libellé simple) — les débits deviennent des dépenses exceptionnelles à leur date réelle, les crédits des revenus uniques, avec rapprochement automatique des catégories et récapitulatif avant import ; **anti-doublons** : une ligne correspondant à une écriture déjà planifiée (même catégorie/sous-catégorie, même montant à 0,01 € près, mois compatible) n'est pas importée en double
+- **Sélecteur de mois filtrable** 🧾 : les mois chargés (dépense exceptionnelle ou revenu unique, typiquement importés d'un relevé) sont marqués 🧾 ; le filtre « Mois chargés » restreint la liste, et les mois chargés hors de la fenêtre de 12 mois y figurent aussi (annotés « hors fenêtre »)
+- **Sous-catégories récurrentes identifiées** : dans les formulaires de dépense, les sous-catégories déjà couvertes par une dépense récurrente sont marquées « · récurrente » (🔒 si incompressible), avec avertissement détaillé
 - **Dépenses récurrentes** : montant, jour de débit (1–31), catégorie bancaire, fréquence mensuelle ou annuelle
 - **Dépenses exceptionnelles** : dépenses unitaires à date précise, catégorisées, intégrées à la simulation et au budget
 - **Dépenses incompressibles** 🔒 : marqueur sur chaque dépense, visualisation incompressible vs discrétionnaire
@@ -70,6 +72,8 @@ Module **sans dépendance React**, donc testable isolément :
 | `migrateState(raw)` | Complète une sauvegarde, convertit les anciennes catégories plates vers la nomenclature bancaire (`LEGACY_CATS`) |
 | `transactionsOfMonth(state, y, m)` | Opérations du mois : récurrentes + exceptionnelles + salaires (13ᵉ mois, bonus) |
 | `simulate(state, startY, startM)` | Simulation de 12 mois enchaînés : solde quotidien, point bas, totaux |
+| `monthSim(state, y, m, opening)` | Vue d'un mois isolé (même forme que `simulate()`) : mois chargé hors fenêtre, solde d'ouverture fourni |
+| `loadedMonths(state)` | Mois « chargés » (dépense exceptionnelle ou revenu unique), triés, sans doublon |
 | `monthlyExpenses(state, y, m)` | Totaux par enveloppe (`byEnv`), par catégorie bancaire (`byCat`), détail `env\|cat\|sub` et répartition incompressible / discrétionnaire |
 
 `src/lib/taxonomie.js` fournit la nomenclature bancaire à 2 niveaux :
@@ -113,7 +117,7 @@ Le modèle de données est volontairement simple :
 ## Tests
 
 La suite couvre : années bissextiles, tri et signe des opérations, exclusion des dépenses annuelles hors de leur mois, clamp du jour
-31, jours de paie (dont franchissement de week-end), 13ᵉ mois en juin/novembre, bonus de mars, dépenses exceptionnelles, revenus uniques (mode `unique`), enchaînement des soldes d'un mois à l'autre, détection de découvert, passage à l'année suivante, migration des anciennes sauvegardes (dont conversion des anciennes catégories plates), intégrité de la nomenclature bancaire, rattachement des enveloppes et agrégats incompressible/discrétionnaire ; parsing de l'import CSV (dates et montants français, BOM/CRLF, lignes invalides, rapprochement des libellés, conversion en écritures, déduction de sous-catégorie via « Libellé opération ») ; anti-doublons de l'import (dépenses récurrentes mensuelles/annuelles, consommation unique d'une écriture, revenus fixe/salaire/unique). **72 tests** au total.
+31, jours de paie (dont franchissement de week-end), 13ᵉ mois en juin/novembre, bonus de mars, dépenses exceptionnelles, revenus uniques (mode `unique`), vue de mois isolé (`monthSim`), liste des mois chargés (`loadedMonths`), enchaînement des soldes d'un mois à l'autre, détection de découvert, passage à l'année suivante, migration des anciennes sauvegardes (dont conversion des anciennes catégories plates), intégrité de la nomenclature bancaire, rattachement des enveloppes et agrégats incompressible/discrétionnaire ; parsing de l'import CSV (dates et montants français, BOM/CRLF, lignes invalides, rapprochement des libellés, conversion en écritures, déduction de sous-catégorie via « Libellé opération ») ; anti-doublons de l'import (dépenses récurrentes mensuelles/annuelles, consommation unique d'une écriture, revenus fixe/salaire/unique). **77 tests** au total.
 
 ```bash
 npm test            # une seule exécution

@@ -22,6 +22,8 @@ import {
   monthLabel,
   salaryPayDay,
   simulate,
+  monthSim,
+  loadedMonths,
   migrateState,
   monthlyExpenses,
 } from "./lib/budget.js";
@@ -194,7 +196,10 @@ export default function App() {
   const [state, setState] = useState(DEFAULT_STATE);
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState("apercu");
-  const [monthIdx, setMonthIdx] = useState(0);
+  // Mois affiché : clé "y-m" (les mois chargés hors fenêtre y figurent aussi)
+  const [selKey, setSelKey] = useState(null);
+  // Filtre du sélecteur : ne montrer que les mois chargés (🧾)
+  const [onlyLoaded, setOnlyLoaded] = useState(false);
   const fileRef = useRef(null);
   const csvRef = useRef(null);
 
@@ -220,7 +225,34 @@ export default function App() {
 
   const start = useMemo(() => ({ y: now.getFullYear(), m: now.getMonth() }), []);
   const sims = useMemo(() => simulate(state, start.y, start.m), [state, start]);
-  const sim = sims[Math.min(monthIdx, 11)];
+
+  // ----- Sélecteur de mois : 12 mois simulés + mois chargés hors fenêtre -----
+  const monthsAll = useMemo(() => {
+    const loaded = loadedMonths(state);
+    const dataKeys = new Set(loaded.map((d) => d.y + "-" + d.m));
+    const inWindow = sims.map((s) => ({
+      ...s,
+      horsFenetre: false,
+      hasData: dataKeys.has(s.y + "-" + s.m),
+    }));
+    // Mois chargés situés hors de la fenêtre de 12 mois (ex. relevé du mois
+    // précédent importé après coup) : affichés seuls, solde d'ouverture = solde de départ.
+    const extra = loaded
+      .filter((d) => !sims.some((s) => s.y === d.y && s.m === d.m))
+      .map((d) => ({ ...monthSim(state, d.y, d.m, state.soldeDepart), horsFenetre: true, hasData: true }));
+    return [...inWindow, ...extra].sort((a, b) => a.y - b.y || a.m - b.m);
+  }, [state, sims]);
+
+  const options = useMemo(() => {
+    const filtered = onlyLoaded ? monthsAll.filter((s) => s.hasData) : monthsAll;
+    return filtered.length > 0 ? filtered : monthsAll; // repli si aucun mois chargé
+  }, [monthsAll, onlyLoaded]);
+
+  const sim = options.find((s) => s.y + "-" + s.m === selKey) ?? options[0] ?? sims[0];
+  const optIdx = options.indexOf(sim);
+  // Index du mois affiché dans les 12 mois simulés (les formulaires ne
+  // proposent que la fenêtre) ; 0 si le mois affiché est hors fenêtre.
+  const simIdx = Math.max(0, sims.findIndex((s) => s.y === sim.y && s.m === sim.m));
 
   const setSolde = (n) => setState((s) => ({ ...s, soldeDepart: n }));
 
@@ -360,16 +392,40 @@ export default function App() {
                 <NumInput value={state.soldeDepart} onChange={setSolde} />
               </Field>
             </div>
-            <button className={btnCls} onClick={() => setMonthIdx((i) => Math.max(0, i - 1))} disabled={monthIdx === 0}>
+            <button
+              className={btnCls}
+              onClick={() => setSelKey(options[optIdx - 1].y + "-" + options[optIdx - 1].m)}
+              disabled={optIdx <= 0}
+            >
               ←
             </button>
-            <select className={inputCls + " w-44"} value={monthIdx} onChange={(e) => setMonthIdx(Number(e.target.value))}>
-              {sims.map((s, i) => (
-                <option key={i} value={i}>{s.label}</option>
+            <select
+              className={inputCls + " w-44"}
+              value={sim.y + "-" + sim.m}
+              onChange={(e) => setSelKey(e.target.value)}
+              title="Mois affiché — 🧾 = mois chargé (données importées ou exceptionnelles)"
+            >
+              {options.map((s) => (
+                <option key={s.y + "-" + s.m} value={s.y + "-" + s.m}>
+                  {s.label + (s.hasData ? " 🧾" : "") + (s.horsFenetre ? " (hors fenêtre)" : "")}
+                </option>
               ))}
             </select>
-            <button className={btnCls} onClick={() => setMonthIdx((i) => Math.min(11, i + 1))} disabled={monthIdx === 11}>
+            <button
+              className={btnCls}
+              onClick={() => setSelKey(options[optIdx + 1].y + "-" + options[optIdx + 1].m)}
+              disabled={optIdx < 0 || optIdx >= options.length - 1}
+            >
               →
+            </button>
+            <button
+              className={(onlyLoaded
+                ? "border-transparent bg-indigo-600 text-white shadow"
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100") + " rounded-lg px-3 py-2 text-sm font-medium transition"}
+              onClick={() => setOnlyLoaded((v) => !v)}
+              title="N'afficher que les mois chargés (dépense exceptionnelle ou revenu unique, typiquement importés d'un relevé)"
+            >
+              🧾 Mois chargés
             </button>
             <button className={btnCls} onClick={exportData} title="Télécharger vos données en JSON">📤 Exporter</button>
             <button className={btnCls} onClick={() => fileRef.current && fileRef.current.click()} title="Restaurer depuis un fichier JSON">📥 Importer</button>
@@ -640,8 +696,8 @@ export default function App() {
             </div>
 
             <div className="space-y-6">
-              <ExpenseForm onAdd={addExpense} />
-              <ExtraForm sims={sims} monthIdx={monthIdx} onAdd={addExtra} />
+              <ExpenseForm expenses={state.expenses} onAdd={addExpense} />
+              <ExtraForm sims={sims} monthIdx={simIdx} expenses={state.expenses} onAdd={addExtra} />
             </div>
           </div>
         )}
@@ -696,7 +752,7 @@ export default function App() {
               </div>
             </Card>
 
-            <IncomeForm sims={sims} monthIdx={monthIdx} onAdd={addIncome} />
+            <IncomeForm sims={sims} monthIdx={simIdx} onAdd={addIncome} />
           </div>
         )}
 
@@ -825,8 +881,29 @@ export default function App() {
 
 /* ============================== Formulaires ============================== */
 
-function ExpenseForm({ onAdd }) {
+/**
+ * Pour chaque couple catégorie|sous-catégorie : nombre de dépenses récurrentes
+ * qui l'utilisent déjà, dont combien d'incompressibles, et leurs libellés
+ * (3 premiers). Sert à identifier les sous-catégories récurrentes dans les
+ * formulaires de dépense.
+ */
+function recurrencesBySub(expenses) {
+  const map = new Map();
+  for (const e of expenses ?? []) {
+    if (!e.sub) continue;
+    const k = (e.cat ?? "") + "|" + e.sub;
+    const cur = map.get(k) ?? { count: 0, inc: 0, labels: [] };
+    cur.count++;
+    if (e.incompressible) cur.inc++;
+    if (cur.labels.length < 3) cur.labels.push(e.label);
+    map.set(k, cur);
+  }
+  return map;
+}
+
+function ExpenseForm({ expenses = [], onAdd }) {
   const DEPCATS = useMemo(() => depenseCats(), []);
+  const recBySub = useMemo(() => recurrencesBySub(expenses), [expenses]);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState(0);
   const [day, setDay] = useState(1);
@@ -896,12 +973,28 @@ function ExpenseForm({ onAdd }) {
           <Field label="Sous-catégorie">
             <select className={inputCls} value={sub} onChange={(e) => setSub(e.target.value)} disabled={subs.length === 0}>
               {subs.length === 0 && <option value="">—</option>}
-              {subs.map((s) => (
-                <option key={s.id} value={s.id}>{s.label}</option>
-              ))}
+              {subs.map((s) => {
+                const rec = recBySub.get(cat + "|" + s.id);
+                return (
+                  <option key={s.id} value={s.id}>
+                    {s.label + (rec ? " · récurrente" : "") + (rec?.inc ? " 🔒" : "")}
+                  </option>
+                );
+              })}
             </select>
           </Field>
         </div>
+        {recBySub.get(cat + "|" + sub) && (
+          <p className="text-xs text-amber-700">
+            {"⚠️ Sous-catégorie déjà couverte par " +
+              recBySub.get(cat + "|" + sub).count +
+              " dépense(s) récurrente(s)" +
+              (recBySub.get(cat + "|" + sub).inc > 0
+                ? ", dont " + recBySub.get(cat + "|" + sub).inc + " incompressible(s) 🔒"
+                : "") +
+              " (" + recBySub.get(cat + "|" + sub).labels.join(", ") + ")"}
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Fréquence">
             <select className={inputCls} value={freq} onChange={(e) => setFreq(e.target.value)}>
@@ -932,8 +1025,9 @@ function ExpenseForm({ onAdd }) {
   );
 }
 
-function ExtraForm({ sims, monthIdx, onAdd }) {
+function ExtraForm({ sims, monthIdx, expenses = [], onAdd }) {
   const DEPCATS = useMemo(() => depenseCats(), []);
+  const recBySub = useMemo(() => recurrencesBySub(expenses), [expenses]);
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState(0);
   const [day, setDay] = useState(1);
@@ -1014,9 +1108,14 @@ function ExtraForm({ sims, monthIdx, onAdd }) {
           <Field label="Sous-catégorie">
             <select className={inputCls} value={sub} onChange={(e) => setSub(e.target.value)} disabled={subs.length === 0}>
               {subs.length === 0 && <option value="">—</option>}
-              {subs.map((s) => (
-                <option key={s.id} value={s.id}>{s.label}</option>
-              ))}
+              {subs.map((s) => {
+                const rec = recBySub.get(cat + "|" + s.id);
+                return (
+                  <option key={s.id} value={s.id}>
+                    {s.label + (rec ? " · récurrente" : "") + (rec?.inc ? " 🔒" : "")}
+                  </option>
+                );
+              })}
             </select>
           </Field>
         </div>
