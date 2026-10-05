@@ -579,6 +579,26 @@ export function savingsFlowOfMonth(state, y, m) {
   }
   return { versements, retraits, net: versements - retraits, count };
 }
+
+/**
+ * Historique des flux d'épargne RÉELS sur les mois chargés : pour chaque mois
+ * (du plus ancien au plus récent), versements, retraits, flux net et cumul
+ * depuis le premier mois chargé — la trajectoire de la réserve telle que le
+ * relevé la montre. `cumul > 0` : le patrimoine a épargné sur la période ;
+ * `cumul < 0` : la réserve a été sollicitée.
+ *
+ * @returns {Array<{y:number,m:number,label:string,versements:number,retraits:number,net:number,cumul:number}>}
+ */
+export function savingsFlowHistory(state) {
+  const out = [];
+  let cumul = 0;
+  for (const d of loadedMonths(state)) {
+    const f = savingsFlowOfMonth(state, d.y, d.m);
+    cumul += f.net;
+    out.push({ y: d.y, m: d.m, label: monthLabel(d.y, d.m), versements: f.versements, retraits: f.retraits, net: f.net, cumul });
+  }
+  return out;
+}
 /**
  * Cœur de `monthSim` / `realMonthSim` : enchaîne des transactions données
  * jour après jour sur un solde d'ouverture.

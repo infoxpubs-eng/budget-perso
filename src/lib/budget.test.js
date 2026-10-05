@@ -17,6 +17,7 @@ import {
   realTransactionsOfMonth,
   realMonthSim,
   savingsFlowOfMonth,
+  savingsFlowHistory,
   simStart,
   monthlyExpenses,
   isRecurringExpense,
@@ -1180,5 +1181,34 @@ describe("buildMonth — transferts internes dans les KPI du mois", () => {
     expect(mo.totalIn).toBe(3000);
     expect(mo.transfertIn).toBe(3000);
     expect(mo.epargne).toBe(-3000); // réserve sollicitée
+  });
+});
+
+describe("savingsFlowHistory — trajectoire cumulée de l'épargne", () => {
+  it("cumule les flux nets des mois chargés, du plus ancien au plus récent", () => {
+    const st = {
+      expenses: [
+        { id: "e1", label: "Épargne", amount: 3000, day: 26, cat: "epargne", sub: "epargne-bancaire", freq: "mensuelle",
+          history: [{ y: 2026, m: 5, day: 26, amount: 3000 }] },
+      ],
+      incomes: [
+        { id: "i1", label: "Retrait", amount: 1500, mode: "unique", y: 2026, m: 4, day: 10,
+          cat: "mouvements-crediteurs", sub: "virements-recus-comptes" },
+        { id: "i2", label: "Retrait", amount: 1000, mode: "unique", y: 2026, m: 7, day: 10,
+          cat: "mouvements-crediteurs", sub: "virements-recus-comptes" },
+      ],
+      extras: [], taxonomie: TAXONOMIE,
+    };
+    const h = savingsFlowHistory(st);
+    expect(h).toHaveLength(3); // mai, juin, août
+    expect(h[0]).toEqual({ y: 2026, m: 4, label: "Mai 2026", versements: 0, retraits: 1500, net: -1500, cumul: -1500 });
+    expect(h[1].net).toBe(3000);
+    expect(h[1].cumul).toBe(1500);
+    expect(h[2].net).toBe(-1000);
+    expect(h[2].cumul).toBe(500);
+  });
+
+  it("aucun mois chargé → historique vide", () => {
+    expect(savingsFlowHistory({ expenses: [], incomes: [], extras: [] })).toEqual([]);
   });
 });

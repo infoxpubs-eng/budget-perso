@@ -13,6 +13,13 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Alertes d'échéance (notifications en amont des gros débits)
 - Réglages par couple du modèle prédictif (fenêtre / statistique individuelles) — en réserve : voir comment le réglage global évolue déjà à l'usage
 
+## [0.25.0] — 2026-10-05
+
+### Ajouté
+
+- **Carte « Épargne — trajectoire sur les mois chargés » (Aperçu)** : flux net vers l'épargne de chaque mois chargé (versements − retraits, barres vertes/rouges) et cumul depuis le premier mois chargé — la mesure du progrès vers un budget qui épargne sans solliciter la réserve. Mention explicite « la réserve a été sollicitée sur la période » quand le cumul est négatif.
+- `src/lib/budget.js` : nouvelle fonction `savingsFlowHistory(state)` (historique cumulé des flux d'épargne réels, mois chargés du plus ancien au plus récent).
+
 ## [0.24.0] — 2026-10-05
 
 ### Ajouté
