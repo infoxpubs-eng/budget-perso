@@ -1,3 +1,4 @@
+import { TAXONOMIE } from "./taxonomie.js";
 import { describe, it, expect } from "vitest";
 import {
   medianOf,
@@ -264,5 +265,34 @@ describe("remainingProvision — réglages", () => {
       extras: sixVar, expenses: [], y: 2026, m: 9, settings: { window: 3, stat: "moyenne" },
     });
     expect(w3moy.total).toBe(700);
+  });
+});
+
+
+describe("remainingProvision — transferts internes exclus", () => {
+  it("un couple marqué transfert n'est pas provisionné (épargne ≠ habitude)", () => {
+    const extras = [
+      // 3 mois complets de versements d'épargne réguliers…
+      { y: 2026, m: 3, day: 5, amount: 1000, cat: "epargne", sub: "epargne-bancaire", label: "Livret A" },
+      { y: 2026, m: 4, day: 5, amount: 1000, cat: "epargne", sub: "epargne-bancaire", label: "Livret A" },
+      { y: 2026, m: 5, day: 5, amount: 1000, cat: "epargne", sub: "epargne-bancaire", label: "Livret A" },
+      // …et une vraie habitude
+      { y: 2026, m: 3, day: 2, amount: 50, cat: "loisirs", sub: "restaurants", label: "Resto" },
+      { y: 2026, m: 4, day: 2, amount: 50, cat: "loisirs", sub: "restaurants", label: "Resto" },
+      { y: 2026, m: 5, day: 2, amount: 50, cat: "loisirs", sub: "restaurants", label: "Resto" },
+    ];
+    const prov = remainingProvision({ extras, expenses: [], y: 2026, m: 6, taxo: TAXONOMIE });
+    expect(prov.lines.some((l) => l.cat === "epargne")).toBe(false);
+    expect(prov.lines.some((l) => l.sub === "restaurants")).toBe(true);
+  });
+
+  it("sans nomenclature explicite, la référence exclut quand même les transferts", () => {
+    const extras = [
+      { y: 2026, m: 3, day: 5, amount: 1000, cat: "epargne", sub: "epargne-bancaire", label: "Livret A" },
+      { y: 2026, m: 4, day: 5, amount: 1000, cat: "epargne", sub: "epargne-bancaire", label: "Livret A" },
+      { y: 2026, m: 5, day: 5, amount: 1000, cat: "epargne", sub: "epargne-bancaire", label: "Livret A" },
+    ];
+    const prov = remainingProvision({ extras, expenses: [], y: 2026, m: 6 });
+    expect(prov.lines.some((l) => l.cat === "epargne")).toBe(false);
   });
 });

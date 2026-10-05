@@ -531,8 +531,13 @@ export default function App() {
   // Réglages du modèle (fenêtre, seuil de présence, statistique) : persistés
   // avec l'état, éditables dans la console 🛠️ Admin.
   const est = state.estimation ?? DEFAULT_ESTIMATION;
+  // Transferts internes du mois affiché (versements / retraits d'épargne) :
+  // ils s'enchaînent dans le solde mais ne sont ni revenus ni dépenses —
+  // réels sur un mois chargé, prévus (écritures planifiées) sur un mois simulé.
+  const epargne = { versements: sim.transfertOut, retraits: sim.transfertIn, net: sim.epargne };
+  const epargnePrevue = sim.hasData !== true && epargne.versements + epargne.retraits > 0;
   const prov = useMemo(
-    () => remainingProvision({ extras: state.extras, expenses: state.expenses, y: sim.y, m: sim.m, settings: est }),
+    () => remainingProvision({ extras: state.extras, expenses: state.expenses, y: sim.y, m: sim.m, settings: est, taxo: state.taxonomie }),
     [state.extras, state.expenses, state.estimation, sim.y, sim.m]
   );
   const recYear = useMemo(
@@ -655,10 +660,32 @@ export default function App() {
         {/* ------------------------------ APERÇU ------------------------------ */}
         {tab === "apercu" && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-7">
               <Kpi label="Solde en début de mois" value={fmt(sim.start)} />
-              <Kpi label="Revenus du mois" value={"+ " + fmt(sim.totalIn)} tone="good" />
-              <Kpi label="Dépenses du mois" value={"− " + fmt(sim.totalOut)} tone="bad" />
+              <Kpi
+                label="Revenus du mois"
+                value={"+ " + fmt(sim.totalIn - epargne.retraits)}
+                tone="good"
+                hint={epargne.retraits > 0 ? "Hors retraits d'épargne : + " + fmt(epargne.retraits) : null}
+              />
+              <Kpi
+                label="Dépenses du mois"
+                value={"− " + fmt(sim.totalOut - epargne.versements)}
+                tone="bad"
+                hint={epargne.versements > 0 ? "Hors versements d'épargne : − " + fmt(epargne.versements) : null}
+              />
+              <Kpi
+                label="Épargne du mois"
+                value={epargne.net > 0 ? "+ " + fmt(epargne.net) : epargne.net < 0 ? "− " + fmt(-epargne.net) : fmt(0)}
+                tone={epargne.net > 0 ? "good" : epargne.net < 0 ? "bad" : null}
+                hint={
+                  epargne.versements + epargne.retraits === 0
+                    ? "Transferts internes (hors budget)"
+                    : epargne.net < 0
+                      ? (epargnePrevue ? "Prévu — " : "") + "⚠️ Réserve sollicitée : retraits " + fmt(epargne.retraits) + " · versements " + fmt(epargne.versements)
+                      : (epargnePrevue ? "Prévu — " : "") + "Versements " + fmt(epargne.versements) + (epargne.retraits > 0 ? " · retraits " + fmt(epargne.retraits) : "")
+                }
+              />
               <Kpi
                 label="Solde actuel"
                 value={fmt(soldeActuel)}

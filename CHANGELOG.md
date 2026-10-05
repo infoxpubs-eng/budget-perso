@@ -13,6 +13,20 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Alertes d'échéance (notifications en amont des gros débits)
 - Réglages par couple du modèle prédictif (fenêtre / statistique individuelles) — en réserve : voir comment le réglage global évolue déjà à l'usage
 
+## [0.24.0] — 2026-10-05
+
+### Ajouté
+
+- **Transferts internes d'épargne — ni revenus, ni dépenses** : les couples « Épargne bancaire (Livret A, CSL, PEL…) » et « Virements reçus de comptes à comptes » sont marqués `transfert` dans la nomenclature (marqueur fusionné automatiquement sur les anciens états, `TAXO_FLAGS_VERSION` 2). Ces mouvements s'enchaînent normalement dans le solde (il reste exact au centime) mais sortent des KPI de budget : « Revenus du mois » et « Dépenses du mois » sont affichés **hors retraits / versements d'épargne**, avec le montant exclu en info-bulle.
+- **KPI « Épargne du mois »** (Aperçu) : flux net vers l'épargne du mois affiché — versements − retraits, réels sur un mois chargé, prévus (écritures planifiées) sur un mois simulé. Vert quand le mois épargne, rouge avec mention « ⚠️ Réserve sollicitée » quand il a fallu piocher dedans, neutre sinon.
+- La provision d'habitudes exclut désormais les couples marqués `transfert` : l'épargne n'est pas apprise comme une habitude de dépense.
+
+### Technique
+
+- `src/lib/taxonomie.js` : marqueur `transfert` + `subTransfert()` + fusion dans `applyDefaultFlags` (version 2).
+- `src/lib/budget.js` : `buildMonth` calcule `transfertOut` / `transfertIn` / `epargne` à côté de `totalIn` / `totalOut` ; nouvelle fonction `savingsFlowOfMonth` (flux réels d'un mois chargé).
+- `src/lib/estimation.js` : `remainingProvision` accepte `taxo` et exclut les couples transferts.
+
 ## [0.23.0] — 2026-10-05
 
 ### Ajouté

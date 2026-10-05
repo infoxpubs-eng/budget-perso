@@ -20,6 +20,7 @@ import {
   envelopeOf,
   subIncompressible,
   subRecurring,
+  subTransfert,
   taxCat,
   TAXO_FLAGS_VERSION,
   applyDefaultFlags,
@@ -372,7 +373,7 @@ export function recurringMonthTotals(state, y, m) {
  * fenêtre de 12 mois).
  */
 export function monthSim(state, y, m, opening) {
-  return buildMonth(y, m, opening, transactionsOfMonth(state, y, m));
+  return buildMonth(y, m, opening, transactionsOfMonth(state, y, m), { taxo: state.taxonomie });
 }
 
 /**
@@ -384,7 +385,7 @@ export function monthSim(state, y, m, opening) {
  * « solde actuel » exact.
  */
 export function realMonthSim(state, y, m, opening, { today = null } = {}) {
-  return buildMonth(y, m, opening, realTransactionsOfMonth(state, y, m, { today }), { today });
+  return buildMonth(y, m, opening, realTransactionsOfMonth(state, y, m, { today }), { today, taxo: state.taxonomie });
 }
 
 /**
@@ -551,16 +552,45 @@ export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
   return tx;
 }
 
+
+/**
+ * Flux d'épargne RÉEL du mois (y, m) : transferts internes chargés —
+ * versements vers l'épargne (Livret A, CSL, PEL…) et retraits depuis elle
+ * (« Virements reçus de comptes à comptes »). Ces mouvements ne sont ni un
+ * revenu ni une dépense de budget : ils déplacent l'argent entre les poches
+ * du même patrimoine. `net > 0` = le mois a épargné ; `net < 0` = la réserve
+ * a été sollicitée.
+ *
+ * Ne compte que les lignes réellement chargées (aucune re-simulation) ;
+ * retourne des montants nuls pour un mois sans données.
+ *
+ * @returns {{versements:number, retraits:number, net:number, count:number}}
+ */
+export function savingsFlowOfMonth(state, y, m) {
+  const taxo = state.taxonomie ?? TAXONOMIE;
+  let versements = 0;
+  let retraits = 0;
+  let count = 0;
+  for (const t of realTransactionsOfMonth(state, y, m)) {
+    if (!subTransfert(t.cat, t.sub, taxo)) continue;
+    count++;
+    if (t.amount < 0) versements += -t.amount;
+    else retraits += t.amount;
+  }
+  return { versements, retraits, net: versements - retraits, count };
+}
 /**
  * Cœur de `monthSim` / `realMonthSim` : enchaîne des transactions données
  * jour après jour sur un solde d'ouverture.
  */
-function buildMonth(y, m, opening, tx, { today = null } = {}) {
+function buildMonth(y, m, opening, tx, { today = null, taxo = TAXONOMIE } = {}) {
   const dim = daysInMonth(y, m);
   const daily = [];
   let bal = opening;
   let totalIn = 0;
   let totalOut = 0;
+  let transfertOut = 0; // versements d'épargne / transferts internes débits
+  let transfertIn = 0; // retraits d'épargne / transferts internes crédits
   let min = opening;
   let minDay = 0;
   let realSoFar = 0; // somme des flux RÉELS jusqu'au jour `today` (mois courant)
@@ -571,6 +601,10 @@ function buildMonth(y, m, opening, tx, { today = null } = {}) {
       bal += e.amount;
       if (e.type === "in") totalIn += e.amount;
       else totalOut += -e.amount;
+      if (subTransfert(e.cat, e.sub, taxo)) {
+        if (e.amount < 0) transfertOut += -e.amount;
+        else transfertIn += e.amount;
+      }
       if (today !== null && day <= today && e.real) realSoFar += e.amount;
     }
     daily.push({ day, solde: bal, date: day + " " + MONTHS[m], events });
@@ -579,7 +613,12 @@ function buildMonth(y, m, opening, tx, { today = null } = {}) {
       minDay = day;
     }
   }
-  return { y, m, label: monthLabel(y, m), start: opening, end: bal, min, minDay, totalIn, totalOut, tx, daily, realSoFar };
+  return {
+    y, m, label: monthLabel(y, m), start: opening, end: bal, min, minDay,
+    totalIn, totalOut, transfertOut, transfertIn,
+    epargne: transfertOut - transfertIn, // flux net vers l'épargne (prévu si mois simulé)
+    tx, daily, realSoFar,
+  };
 }
 
 /**

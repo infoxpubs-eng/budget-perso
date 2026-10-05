@@ -43,6 +43,8 @@ export const PRESENCE_MIN = 0.5;
  * - `stat` : statistique de tendance, "mediane" (peu sensible aux
  *   extrêmes) ou "moyenne" (suit les gros mois).
  */
+import { subTransfert } from "./taxonomie.js";
+
 export const DEFAULT_ESTIMATION = {
   window: TENDENCY_WINDOW,
   presenceMin: PRESENCE_MIN,
@@ -181,7 +183,7 @@ export function coupleTendencies(extras = [], upto, settings = {}) {
  *          settings?:{window?:number,presenceMin?:number,stat?:"mediane"|"moyenne"}}} args
  * @returns {{lines:Array<{cat:string,sub:string,tendency:number,spent:number,left:number}>, total:number}}
  */
-export function remainingProvision({ extras = [], expenses = [], y, m, settings = {} } = {}) {
+export function remainingProvision({ extras = [], expenses = [], y, m, settings = {}, taxo } = {}) {
   if (!Number.isFinite(y) || !Number.isFinite(m)) return { lines: [], total: 0 };
   const cfg = normEstimation(settings);
   const tendencies = coupleTendencies(extras, { y, m }, cfg);
@@ -200,6 +202,9 @@ export function remainingProvision({ extras = [], expenses = [], y, m, settings 
     if (t.tendency <= 0) continue;
     const k = t.cat + "|" + t.sub;
     if (planned.has(k)) continue;
+    // Transfert interne (épargne, comptes à comptes) : hors budget et hors
+    // provision — ce n'est pas une habitude de dépense.
+    if (subTransfert(t.cat, t.sub, taxo)) continue;
     const spent = spentBy.get(k) ?? 0;
     const left = Math.max(0, t.tendency - spent);
     lines.push({ cat: t.cat, sub: t.sub, tendency: t.tendency, spent, left });

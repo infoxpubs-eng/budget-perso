@@ -16,6 +16,7 @@ import {
   hasRealData,
   realTransactionsOfMonth,
   realMonthSim,
+  savingsFlowOfMonth,
   simStart,
   monthlyExpenses,
   isRecurringExpense,
@@ -37,6 +38,7 @@ import {
   addSubcategory,
   setSubFlags,
   subIncompressible,
+  subTransfert,
   renameCategory,
   renameSubcategory,
   setCategoryActive,
@@ -1080,5 +1082,103 @@ describe("realMonthSim — chaînage réel", () => {
   it("un mois sans données réelles reste simulé par monthSim (hors chaînage réel)", () => {
     const mo = monthSim(st(), 2026, 8, 500); // septembre : rien de chargé → loyer planifié −850
     expect(mo.end).toBe(-350);
+  });
+});
+
+
+describe("transferts internes — subTransfert / savingsFlowOfMonth", () => {
+  const st = () => ({
+    expenses: [
+      { id: "e1", label: "Loyer", amount: 850, day: 3, cat: "logement", sub: "loyers-charges", freq: "mensuelle",
+        history: [{ y: 2026, m: 5, day: 3, amount: 850 }] },
+      { id: "e2", label: "Épargne", amount: 2200, day: 26, cat: "epargne", sub: "epargne-bancaire", freq: "mensuelle",
+        history: [{ y: 2026, m: 5, day: 26, amount: 2200 }] },
+    ],
+    incomes: [
+      { id: "i1", label: "Salaire", amount: 2500, mode: "salaire",
+        history: [{ y: 2026, m: 5, day: 28, amount: 2510 }] },
+      { id: "i2", label: "Retrait épargne", amount: 3000, mode: "unique", y: 2026, m: 5, day: 10,
+        cat: "mouvements-crediteurs", sub: "virements-recus-comptes" },
+    ],
+    extras: [
+      { y: 2026, m: 5, day: 26, amount: 800, cat: "epargne", sub: "epargne-bancaire", label: "VIR EMIS CSL" },
+    ],
+    taxonomie: TAXONOMIE,
+  });
+
+  it("subTransfert : épargne bancaire et virements de comptes à comptes", () => {
+    expect(subTransfert("epargne", "epargne-bancaire")).toBe(true);
+    expect(subTransfert("mouvements-crediteurs", "virements-recus-comptes")).toBe(true);
+    expect(subTransfert("logement", "loyers-charges")).toBe(false);
+    expect(subTransfert(null, null)).toBe(false);
+  });
+
+  it("savingsFlowOfMonth : versements, retraits et net sur un mois chargé", () => {
+    const f = savingsFlowOfMonth(st(), 2026, 5);
+    expect(f.versements).toBe(3000); // 2200 (occurrence) + 800 (extra)
+    expect(f.retraits).toBe(3000); // revenu unique reçu
+    expect(f.net).toBe(0);
+    expect(f.count).toBe(3);
+  });
+
+  it("savingsFlowOfMonth : net négatif quand la réserve est sollicitée", () => {
+    const s0 = st();
+    s0.expenses[1].history = []; // aucun versement ce mois-ci
+    const f = savingsFlowOfMonth(s0, 2026, 5);
+    expect(f.versements).toBe(800);
+    expect(f.net).toBe(-2200);
+  });
+
+  it("savingsFlowOfMonth : mois sans données → flux nul", () => {
+    const f = savingsFlowOfMonth(st(), 2027, 0);
+    expect(f.net).toBe(0);
+    expect(f.count).toBe(0);
+  });
+
+  it("migrateState applique le marqueur transfert aux anciennes nomenclatures (TAXO_FLAGS_VERSION 2)", () => {
+    const raw = {
+      soldeDepart: 0,
+      expenses: [], incomes: [], extras: [],
+      taxoFlagsVersion: 1, // état sauvegardé avant les transferts internes
+      taxonomie: defaultTaxonomie().map((c) => ({
+        ...c,
+        subs: c.subs.map((x) => ({ ...x, transfert: false })),
+      })),
+    };
+    const s = migrateState(raw);
+    expect(s.taxoFlagsVersion).toBe(2);
+    expect(subTransfert("epargne", "epargne-bancaire", s.taxonomie)).toBe(true);
+    expect(subTransfert("mouvements-crediteurs", "virements-recus-comptes", s.taxonomie)).toBe(true);
+  });
+});
+
+describe("buildMonth — transferts internes dans les KPI du mois", () => {
+  it("monthSim : une écriture planifiée d'épargne est comptée dans le solde mais isolée en transfert", () => {
+    const st = {
+      expenses: [
+        { id: "e1", label: "Épargne", amount: 2200, day: 26, cat: "epargne", sub: "epargne-bancaire", freq: "mensuelle" },
+      ],
+      incomes: [], extras: [], taxonomie: TAXONOMIE,
+    };
+    const mo = monthSim(st, 2026, 10, 2000); // novembre simulé
+    expect(mo.end).toBe(-200); // le solde enchaîne bien le versement
+    expect(mo.totalOut).toBe(2200);
+    expect(mo.transfertOut).toBe(2200);
+    expect(mo.epargne).toBe(2200);
+  });
+
+  it("realMonthSim : un retrait d'épargne réel est isolé en transfertIn", () => {
+    const st = {
+      expenses: [],
+      incomes: [
+        { id: "i1", label: "Retrait Livret A", amount: 3000, mode: "unique", y: 2026, m: 8, day: 12,
+          cat: "mouvements-crediteurs", sub: "virements-recus-comptes" },
+      ],
+      extras: [], taxonomie: TAXONOMIE,
+    };
+    const mo = realMonthSim(st, 2026, 8, 500); // septembre chargé
+    expect(mo.totalIn).toBe(3000);
+    expect(mo.transfertIn).toBe(3000);
+    expect(mo.epargne).toBe(-3000); // réserve sollicitée
   });
 });

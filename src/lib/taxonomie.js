@@ -110,7 +110,7 @@ export const TAXONOMIE = [
   {
     id: "epargne", label: "Dépenses d'épargne", nature: "depense", env: "domestiques",
     subs: [
-      { id: "epargne-bancaire", label: "Épargne bancaire (Livret A, PEL…)" , recurring: true },
+      { id: "epargne-bancaire", label: "Épargne bancaire (Livret A, PEL…)" , recurring: true, transfert: true },
     ],
   },
   {
@@ -138,7 +138,7 @@ export const TAXONOMIE = [
   {
     id: "mouvements-crediteurs", label: "Mouvements internes créditeurs", nature: "revenu",
     subs: [
-      { id: "virements-recus-comptes", label: "Virements reçus de comptes à comptes" },
+      { id: "virements-recus-comptes", label: "Virements reçus de comptes à comptes" , transfert: true },
     ],
   },
   {
@@ -187,6 +187,15 @@ export function subRecurring(catId, subId, taxo = TAXONOMIE) {
   return !!taxSub(catId, subId, taxo)?.recurring;
 }
 
+
+/** Une sous-catégorie marquée « transfert interne » déplace l'argent entre
+ * les poches du même patrimoine (épargne bancaire, comptes à comptes) :
+ * ce n'est ni un revenu ni une dépense de budget — voir budget.js →
+ * savingsFlowOfMonth et estimation.js (exclusion de la provision). */
+export function subTransfert(catId, subId, taxo = TAXONOMIE) {
+  if (!catId || !subId) return false;
+  return !!taxSub(catId, subId, taxo)?.transfert;
+}
 /** Nature effective d'une sous-catégorie (redéfinition possible). */
 export function subNature(cat, sub) {
   if (!cat) return null;
@@ -312,10 +321,10 @@ export function subByOperation(catId, opLabel, taxo = TAXONOMIE) {
  * la version — les choix explicitement faits ensuite dans la console
  * d'administration ne sont plus écrasés.
  */
-export const TAXO_FLAGS_VERSION = 1;
+export const TAXO_FLAGS_VERSION = 2;
 
 /**
- * Fusionne les marqueurs 🔁/🔒 des sous-catégories de référence sur une
+ * Fusionne les marqueurs 🔁/🔒/transfert des sous-catégories de référence sur une
  * nomenclature existante — fonction pure. La fusion ne retire jamais de
  * marqueur : un indicateur déjà à `true` (choix de l'utilisateur) est
  * conservé ; les sous-catégories personnalisées (hors nomenclature de
@@ -334,6 +343,7 @@ export function applyDefaultFlags(taxo) {
           ...s,
           recurring: !!s.recurring || !!refSub.recurring,
           incompressible: !!s.incompressible || !!refSub.incompressible,
+          transfert: !!s.transfert || !!refSub.transfert,
         };
       }),
     };
