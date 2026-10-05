@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCsv, parseFrDate, parseFrAmount, rowsToEntries, matchesPlannedExpense, matchesPlannedIncome, applyTaxoAdditions, mergeHistory, mergeAddedLines, A_CLASSER } from "./import-csv.js";
+import { parseCsv, parseFrDate, parseFrAmount, rowsToEntries, matchesPlannedExpense, matchesPlannedIncome, applyTaxoAdditions, mergeHistory, mergeAddedLines, A_CLASSER, EPARGNE_LABEL_RE } from "./import-csv.js";
 import { TAXONOMIE, catByLabel, subByLabel, subByOperation, normalizeLabel } from "./taxonomie.js";
 
 /* Extrait réel d'un relevé bancaire (CRLF, séparateur « ; », colonne vide finale). */
@@ -848,5 +848,49 @@ describe("réimport d'une série 🔁 à montant variable", () => {
     const c = next.coveredHistory[0];
     expect(c.syncAmount).toBe(true);
     expect(c.obs).toEqual([{ day: 5, m: 8, y: 2026, amount: 920 }]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* v0.24 — Heuristique libellés épargne (Livret A, CSL, PEL…)          */
+/* ------------------------------------------------------------------ */
+
+describe("import CSV — virements d'épargne ⇄", () => {
+  const head = "Date transaction;Date comptabilisation;Libellé opération;Catégorie;Sous-Catégorie;Montant;Pointée;";
+
+  it("libellé « Livret A » inconnu → couple transfert epargne/epargne-bancaire (versement)", () => {
+    const csv = head + "\n05/10/2026;05/10/2026;VIREMENT EMIS LIVRET A;Non catégorisée;;-3000,00;Oui;\n";
+    const { rows } = parseCsv(csv);
+    expect(rows[0].cat).toBe("epargne");
+    expect(rows[0].sub).toBe("epargne-bancaire");
+  });
+
+  it("libellé « CSL » inconnu, crédit → couple transfert revenus-epargne/autres (retrait)", () => {
+    const csv = head + "\n05/10/2026;05/10/2026;VIR RECU CSL;Non catégorisée;;+1500,00;Oui;\n";
+    const { rows } = parseCsv(csv);
+    expect(rows[0].cat).toBe("revenus-epargne");
+    expect(rows[0].sub).toBe("autres");
+  });
+
+  it("un couple déjà catégorisé n'est PAS réécrit par l'heuristique", () => {
+    const csv = head + "\n05/10/2026;05/10/2026;VIREMENT LIVRET A;Loisirs;Restaurants, bars, discothèques…;-30,00;Oui;\n";
+    const { rows } = parseCsv(csv);
+    expect(rows[0].cat).toBe("loisirs");
+    expect(rows[0].sub).toBe("restaurants");
+  });
+
+  it("une ligne sans libellé d'épargne reste inchangée (Non catégorisée)", () => {
+    const csv = head + "\n05/10/2026;05/10/2026;PRELEVEMENT EUROPEEN;Non catégorisée;;-69,21;Oui;\n";
+    const { rows } = parseCsv(csv);
+    expect(rows[0].cat).toBeUndefined();
+  });
+
+  it("EPARGNE_LABEL_RE reconnaît CSL, Compte sur Livret et PEL, ignore les autres libellés", () => {
+    expect(EPARGNE_LABEL_RE.test("VIR EMIS CSL")).toBe(true);
+    expect(EPARGNE_LABEL_RE.test("Compte sur Livret")).toBe(true);
+    expect(EPARGNE_LABEL_RE.test("PEL 1234")).toBe(true);
+    expect(EPARGNE_LABEL_RE.test("LIVRET A")).toBe(true);
+    expect(EPARGNE_LABEL_RE.test("RESTO CHEZ PAUL")).toBe(false);
+    expect(EPARGNE_LABEL_RE.test("COURS DE NATATION PISCINE")).toBe(false);
   });
 });

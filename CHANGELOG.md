@@ -13,32 +13,19 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Alertes d'échéance (notifications en amont des gros débits)
 - Réglages par couple du modèle prédictif (fenêtre / statistique individuelles) — en réserve : voir comment le réglage global évolue déjà à l'usage
 
-## [0.26.0] — 2026-10-05
-
-### Ajouté
-
-- **KPI « Tenue sans la réserve » (Aperçu)** : solde de fin de mois probable **hors tout flux d'épargne** (`fin de mois probable − flux net d'épargne du mois`). C'est le juge de paix de l'objectif « vivre sans la réserve » : vert quand le mois tient seul, rouge quand il ne tient que grâce aux retraits d'épargne — l'info-bulle le dit explicitement (« le mois ne tient pas sans les X € de retraits »).
-
-## [0.25.0] — 2026-10-05
-
-### Ajouté
-
-- **Carte « Épargne — trajectoire sur les mois chargés » (Aperçu)** : flux net vers l'épargne de chaque mois chargé (versements − retraits, barres vertes/rouges) et cumul depuis le premier mois chargé — la mesure du progrès vers un budget qui épargne sans solliciter la réserve. Mention explicite « la réserve a été sollicitée sur la période » quand le cumul est négatif.
-- `src/lib/budget.js` : nouvelle fonction `savingsFlowHistory(state)` (historique cumulé des flux d'épargne réels, mois chargés du plus ancien au plus récent).
-
 ## [0.24.0] — 2026-10-05
 
 ### Ajouté
 
-- **Transferts internes d'épargne — ni revenus, ni dépenses** : les couples « Épargne bancaire (Livret A, CSL, PEL…) » et « Virements reçus de comptes à comptes » sont marqués `transfert` dans la nomenclature (marqueur fusionné automatiquement sur les anciens états, `TAXO_FLAGS_VERSION` 2). Ces mouvements s'enchaînent normalement dans le solde (il reste exact au centime) mais sortent des KPI de budget : « Revenus du mois » et « Dépenses du mois » sont affichés **hors retraits / versements d'épargne**, avec le montant exclu en info-bulle.
-- **KPI « Épargne du mois »** (Aperçu) : flux net vers l'épargne du mois affiché — versements − retraits, réels sur un mois chargé, prévus (écritures planifiées) sur un mois simulé. Vert quand le mois épargne, rouge avec mention « ⚠️ Réserve sollicitée » quand il a fallu piocher dedans, neutre sinon.
-- La provision d'habitudes exclut désormais les couples marqués `transfert` : l'épargne n'est pas apprise comme une habitude de dépense.
+- **Transferts internes ⇄ (virements d'épargne)** : les couples « Dépenses d'épargne / Épargne bancaire (Livret A, PEL…) » et « Revenus d'épargne / Revenus d'épargne - Autres » sont marqués « transfert interne » (marqueur ⇄, éditable par couple dans la console 🛠️ Admin comme 🔁 et 🔒). Leurs mouvements comptent toujours dans le **solde** (exact au centime) mais **plus dans les totaux budgétaires** : un versement de 3 000 € vers un livret n'est plus une « dépense », un retrait n'est plus un « revenu » — le budget reflète le train de vie réel. `monthlyExpenses` expose le total `transfers`.
+- **KPI « Flux épargne net »** (Aperçu) : versements − retraits du mois affiché, avec alerte ⚠️ quand il est négatif (« réserve sollicitée ») — le signal d'objectif : vivre du budget courant sans puiser dans l'épargne.
+- **Simulation** : chaque mois expose `transferIn` / `transferOut` / `fluxEpargne` (simulation et mois chargés réels) ; les KPI « Revenus du mois » et « Dépenses du mois » sont désormais hors transferts internes.
+- **Heuristique d'import** : une ligne dont le couple est inconnu mais dont le libellé opération évoque un livret (`Livret A`, `CSL`, `Compte sur Livret`, `PEL`, `LDD` — `EPARGNE_LABEL_RE`) est rangée sur le couple transfert correspondant (versement si débit, retrait si crédit) ; un couple déjà catégorisé par la banque n'est jamais réécrit.
+- `remainingProvision` accepte la nomenclature (`taxo`) et **exclut les couples ⇄** de l'apprentissage des habitudes comme du déjà-dépensé.
 
-### Technique
+### Modifié
 
-- `src/lib/taxonomie.js` : marqueur `transfert` + `subTransfert()` + fusion dans `applyDefaultFlags` (version 2).
-- `src/lib/budget.js` : `buildMonth` calcule `transfertOut` / `transfertIn` / `epargne` à côté de `totalIn` / `totalOut` ; nouvelle fonction `savingsFlowOfMonth` (flux réels d'un mois chargé).
-- `src/lib/estimation.js` : `remainingProvision` accepte `taxo` et exclut les couples transferts.
+- `TAXO_FLAGS_VERSION` passe à 2 : `migrateState` re-applique les marqueurs ⇄ sur les états existants (aucun autre changement de schéma).
 
 ## [0.23.0] — 2026-10-05
 

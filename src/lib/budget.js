@@ -20,7 +20,7 @@ import {
   envelopeOf,
   subIncompressible,
   subRecurring,
-  subTransfert,
+  subTransfer,
   taxCat,
   TAXO_FLAGS_VERSION,
   applyDefaultFlags,
@@ -243,6 +243,7 @@ export function transactionsOfMonth(state, y, m) {
       sub: e.sub,
       inc: !!e.incompressible || subIncompressible(e.cat, e.sub, taxo),
       rec: subRecurring(e.cat, e.sub, taxo),
+      transfer: subTransfer(e.cat, e.sub, taxo),
     });
   }
 
@@ -257,6 +258,7 @@ export function transactionsOfMonth(state, y, m) {
       sub: x.sub ?? "frais-exceptionnels",
       inc: !!x.incompressible || subIncompressible(x.cat, x.sub, state.taxonomie),
       rec: false,
+      transfer: subTransfer(x.cat ?? "logement", x.sub ?? "frais-exceptionnels", taxo),
     });
   }
 
@@ -275,6 +277,7 @@ export function transactionsOfMonth(state, y, m) {
         sub: i.sub,
         inc: false,
         rec: false,
+        transfer: subTransfer(i.cat ?? "revenus-travail", i.sub, taxo),
       });
     } else if (i.mode === "salaire") {
       const day = salaryPayDay(y, m);
@@ -295,6 +298,7 @@ export function transactionsOfMonth(state, y, m) {
         sub: i.sub ?? "salaire-fixe",
         inc: false,
         rec,
+        transfer: subTransfer(i.cat ?? "revenus-travail", i.sub ?? "salaire-fixe", taxo),
       });
     }
   }
@@ -373,7 +377,7 @@ export function recurringMonthTotals(state, y, m) {
  * fenêtre de 12 mois).
  */
 export function monthSim(state, y, m, opening) {
-  return buildMonth(y, m, opening, transactionsOfMonth(state, y, m), { taxo: state.taxonomie });
+  return buildMonth(y, m, opening, transactionsOfMonth(state, y, m));
 }
 
 /**
@@ -385,7 +389,7 @@ export function monthSim(state, y, m, opening) {
  * « solde actuel » exact.
  */
 export function realMonthSim(state, y, m, opening, { today = null } = {}) {
-  return buildMonth(y, m, opening, realTransactionsOfMonth(state, y, m, { today }), { today, taxo: state.taxonomie });
+  return buildMonth(y, m, opening, realTransactionsOfMonth(state, y, m, { today }), { today });
 }
 
 /**
@@ -458,6 +462,7 @@ export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
         inc: !!e.incompressible || subIncompressible(e.cat, e.sub, taxo),
         rec: subRecurring(e.cat, e.sub, taxo),
         real: true,
+        transfer: subTransfer(e.cat, e.sub, taxo),
       });
     }
   }
@@ -475,6 +480,7 @@ export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
         inc: false,
         rec: isRecurringIncome(i, taxo),
         real: true,
+        transfer: subTransfer(i.cat ?? "revenus-travail", i.sub ?? "salaire-fixe", taxo),
       });
     }
   }
@@ -492,6 +498,7 @@ export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
       inc: !!x.incompressible || subIncompressible(x.cat, x.sub, state.taxonomie),
       rec: false,
       real: true,
+      transfer: subTransfer(x.cat ?? "logement", x.sub ?? "frais-exceptionnels", state.taxonomie),
     });
   }
 
@@ -508,6 +515,7 @@ export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
       inc: false,
       rec: false,
       real: true,
+      transfer: subTransfer(i.cat ?? "revenus-travail", i.sub, taxo),
     });
   }
 
@@ -528,6 +536,7 @@ export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
         inc: !!e.incompressible || subIncompressible(e.cat, e.sub, taxo),
         rec: subRecurring(e.cat, e.sub, taxo),
         real: false,
+        transfer: subTransfer(e.cat, e.sub, taxo),
       });
     }
     for (const i of state.incomes) {
@@ -535,15 +544,15 @@ export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
       if (i.mode === "salaire") {
         const day = salaryPayDay(y, m);
         const rec = isRecurringIncome(i, taxo);
-        tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec, real: false });
+        tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec, real: false, transfer: subTransfer(i.cat ?? "revenus-travail", i.sub ?? "salaire-fixe", taxo) });
         if (i.treizieme && (m === 5 || m === 10)) {
-          tx.push({ day, label: i.label + " · 13ᵉ mois (½)", amount: i.amount / 2, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec, real: false });
+          tx.push({ day, label: i.label + " · 13ᵉ mois (½)", amount: i.amount / 2, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec, real: false, transfer: subTransfer(i.cat ?? "revenus-travail", i.sub ?? "salaire-fixe", taxo) });
         }
         if ((i.bonus ?? 0) > 0 && m === 2) {
-          tx.push({ day, label: i.label + " · bonus estimé", amount: i.bonus, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec, real: false });
+          tx.push({ day, label: i.label + " · bonus estimé", amount: i.bonus, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec, real: false, transfer: subTransfer(i.cat ?? "revenus-travail", i.sub ?? "salaire-fixe", taxo) });
         }
       } else {
-        tx.push({ day: Math.min(i.day, dim), label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec: isRecurringIncome(i, taxo), real: false });
+        tx.push({ day: Math.min(i.day, dim), label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec: isRecurringIncome(i, taxo), real: false, transfer: subTransfer(i.cat ?? "revenus-travail", i.sub ?? "salaire-fixe", taxo) });
       }
     }
   }
@@ -552,65 +561,18 @@ export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
   return tx;
 }
 
-
-/**
- * Flux d'épargne RÉEL du mois (y, m) : transferts internes chargés —
- * versements vers l'épargne (Livret A, CSL, PEL…) et retraits depuis elle
- * (« Virements reçus de comptes à comptes »). Ces mouvements ne sont ni un
- * revenu ni une dépense de budget : ils déplacent l'argent entre les poches
- * du même patrimoine. `net > 0` = le mois a épargné ; `net < 0` = la réserve
- * a été sollicitée.
- *
- * Ne compte que les lignes réellement chargées (aucune re-simulation) ;
- * retourne des montants nuls pour un mois sans données.
- *
- * @returns {{versements:number, retraits:number, net:number, count:number}}
- */
-export function savingsFlowOfMonth(state, y, m) {
-  const taxo = state.taxonomie ?? TAXONOMIE;
-  let versements = 0;
-  let retraits = 0;
-  let count = 0;
-  for (const t of realTransactionsOfMonth(state, y, m)) {
-    if (!subTransfert(t.cat, t.sub, taxo)) continue;
-    count++;
-    if (t.amount < 0) versements += -t.amount;
-    else retraits += t.amount;
-  }
-  return { versements, retraits, net: versements - retraits, count };
-}
-
-/**
- * Historique des flux d'épargne RÉELS sur les mois chargés : pour chaque mois
- * (du plus ancien au plus récent), versements, retraits, flux net et cumul
- * depuis le premier mois chargé — la trajectoire de la réserve telle que le
- * relevé la montre. `cumul > 0` : le patrimoine a épargné sur la période ;
- * `cumul < 0` : la réserve a été sollicitée.
- *
- * @returns {Array<{y:number,m:number,label:string,versements:number,retraits:number,net:number,cumul:number}>}
- */
-export function savingsFlowHistory(state) {
-  const out = [];
-  let cumul = 0;
-  for (const d of loadedMonths(state)) {
-    const f = savingsFlowOfMonth(state, d.y, d.m);
-    cumul += f.net;
-    out.push({ y: d.y, m: d.m, label: monthLabel(d.y, d.m), versements: f.versements, retraits: f.retraits, net: f.net, cumul });
-  }
-  return out;
-}
 /**
  * Cœur de `monthSim` / `realMonthSim` : enchaîne des transactions données
  * jour après jour sur un solde d'ouverture.
  */
-function buildMonth(y, m, opening, tx, { today = null, taxo = TAXONOMIE } = {}) {
+function buildMonth(y, m, opening, tx, { today = null } = {}) {
   const dim = daysInMonth(y, m);
   const daily = [];
   let bal = opening;
-  let totalIn = 0;
-  let totalOut = 0;
-  let transfertOut = 0; // versements d'épargne / transferts internes débits
-  let transfertIn = 0; // retraits d'épargne / transferts internes crédits
+  let totalIn = 0; // entrées du mois HORS transferts internes
+  let totalOut = 0; // sorties du mois HORS transferts internes
+  let transferIn = 0; // retraits de la réserve d'épargne (crédités sur le compte)
+  let transferOut = 0; // versements vers la réserve d'épargne (débités du compte)
   let min = opening;
   let minDay = 0;
   let realSoFar = 0; // somme des flux RÉELS jusqu'au jour `today` (mois courant)
@@ -619,12 +581,11 @@ function buildMonth(y, m, opening, tx, { today = null, taxo = TAXONOMIE } = {}) 
     const events = tx.filter((t) => t.day === day);
     for (const e of events) {
       bal += e.amount;
-      if (e.type === "in") totalIn += e.amount;
+      if (e.transfer) {
+        if (e.type === "in") transferIn += e.amount;
+        else transferOut += -e.amount;
+      } else if (e.type === "in") totalIn += e.amount;
       else totalOut += -e.amount;
-      if (subTransfert(e.cat, e.sub, taxo)) {
-        if (e.amount < 0) transfertOut += -e.amount;
-        else transfertIn += e.amount;
-      }
       if (today !== null && day <= today && e.real) realSoFar += e.amount;
     }
     daily.push({ day, solde: bal, date: day + " " + MONTHS[m], events });
@@ -635,9 +596,11 @@ function buildMonth(y, m, opening, tx, { today = null, taxo = TAXONOMIE } = {}) 
   }
   return {
     y, m, label: monthLabel(y, m), start: opening, end: bal, min, minDay,
-    totalIn, totalOut, transfertOut, transfertIn,
-    epargne: transfertOut - transfertIn, // flux net vers l'épargne (prévu si mois simulé)
-    tx, daily, realSoFar,
+    totalIn, totalOut, tx, daily, realSoFar,
+    transferIn, transferOut,
+    // Flux d'épargne net du mois : versements − retraits. Positif = mise de
+    // côté ; négatif = réserve sollicitée (alerte). 0 = aucun transfert.
+    fluxEpargne: transferOut - transferIn,
   };
 }
 
@@ -706,7 +669,14 @@ export function monthlyExpenses(state, y, m) {
   let incompressible = 0;
   let total = 0;
 
+  let transfers = 0; // total des dépenses de transfert interne (épargne)
   const add = (env, cat, amount, inc, sub) => {
+    if (subTransfer(cat, sub, taxo)) {
+      // Transfert interne (versement d'épargne) : ne compte ni dans les
+      // enveloppes ni dans les totaux budgétaires — l'argent reste à vous.
+      transfers += amount;
+      return;
+    }
     if (byEnv[env] === undefined) env = "exceptionnelles";
     const c = taxCat(cat, taxo) ? cat : "logement";
     byEnv[env] += amount;
@@ -742,5 +712,5 @@ export function monthlyExpenses(state, y, m) {
     }
   }
 
-  return { byEnv, incByEnv, byCat, incByCat, detail, incompressible, discretionnaire: total - incompressible, total };
+  return { byEnv, incByEnv, byCat, incByCat, detail, incompressible, discretionnaire: total - incompressible, total, transfers };
 }

@@ -29,6 +29,8 @@
  * la console 🛠️ Admin.
  */
 
+import { TAXONOMIE, subTransfer } from "./taxonomie.js";
+
 /** Fenêtre d'apprentissage par défaut (mois complets, zéros inclus). */
 export const TENDENCY_WINDOW = 6;
 /** Présence minimale par défaut (fraction des mois de la fenêtre) pour provisionner. */
@@ -43,8 +45,6 @@ export const PRESENCE_MIN = 0.5;
  * - `stat` : statistique de tendance, "mediane" (peu sensible aux
  *   extrêmes) ou "moyenne" (suit les gros mois).
  */
-import { subTransfert } from "./taxonomie.js";
-
 export const DEFAULT_ESTIMATION = {
   window: TENDENCY_WINDOW,
   presenceMin: PRESENCE_MIN,
@@ -183,14 +183,20 @@ export function coupleTendencies(extras = [], upto, settings = {}) {
  *          settings?:{window?:number,presenceMin?:number,stat?:"mediane"|"moyenne"}}} args
  * @returns {{lines:Array<{cat:string,sub:string,tendency:number,spent:number,left:number}>, total:number}}
  */
-export function remainingProvision({ extras = [], expenses = [], y, m, settings = {}, taxo } = {}) {
+export function remainingProvision({ extras = [], expenses = [], y, m, settings = {}, taxo = TAXONOMIE } = {}) {
   if (!Number.isFinite(y) || !Number.isFinite(m)) return { lines: [], total: 0 };
   const cfg = normEstimation(settings);
-  const tendencies = coupleTendencies(extras, { y, m }, cfg);
+  // Les couples marqués « transfert interne ⇄ » (virements d'épargne) ne
+  // sont pas des habitudes de dépense : exclus de l'apprentissage comme
+  // du déjà-dépensé.
+  const budgetExtras = extras.filter(
+    (x) => x && !subTransfer(x.cat ?? "?", x.sub ?? "?", taxo)
+  );
+  const tendencies = coupleTendencies(budgetExtras, { y, m }, cfg);
   const planned = new Set();
   for (const e of expenses ?? []) planned.add((e.cat ?? "?") + "|" + (e.sub ?? "?"));
   const spentBy = new Map();
-  for (const x of extras ?? []) {
+  for (const x of budgetExtras ?? []) {
     if (x && x.y === y && x.m === m && typeof x.amount === "number") {
       const k = (x.cat ?? "?") + "|" + (x.sub ?? "?");
       spentBy.set(k, (spentBy.get(k) ?? 0) + x.amount);
@@ -202,9 +208,6 @@ export function remainingProvision({ extras = [], expenses = [], y, m, settings 
     if (t.tendency <= 0) continue;
     const k = t.cat + "|" + t.sub;
     if (planned.has(k)) continue;
-    // Transfert interne (épargne, comptes à comptes) : hors budget et hors
-    // provision — ce n'est pas une habitude de dépense.
-    if (subTransfert(t.cat, t.sub, taxo)) continue;
     const spent = spentBy.get(k) ?? 0;
     const left = Math.max(0, t.tendency - spent);
     lines.push({ cat: t.cat, sub: t.sub, tendency: t.tendency, spent, left });

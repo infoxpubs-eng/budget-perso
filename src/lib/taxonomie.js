@@ -110,7 +110,7 @@ export const TAXONOMIE = [
   {
     id: "epargne", label: "Dépenses d'épargne", nature: "depense", env: "domestiques",
     subs: [
-      { id: "epargne-bancaire", label: "Épargne bancaire (Livret A, PEL…)" , recurring: true, transfert: true },
+      { id: "epargne-bancaire", label: "Épargne bancaire (Livret A, PEL…)" , recurring: true, transfer: true },
     ],
   },
   {
@@ -138,7 +138,7 @@ export const TAXONOMIE = [
   {
     id: "mouvements-crediteurs", label: "Mouvements internes créditeurs", nature: "revenu",
     subs: [
-      { id: "virements-recus-comptes", label: "Virements reçus de comptes à comptes" , transfert: true },
+      { id: "virements-recus-comptes", label: "Virements reçus de comptes à comptes" },
     ],
   },
   {
@@ -157,7 +157,7 @@ export const TAXONOMIE = [
     id: "revenus-epargne", label: "Revenus d'épargne", nature: "revenu",
     subs: [
       { id: "placements", label: "Revenus placement immobiliers" },
-      { id: "autres", label: "Revenus d'épargne - Autres" },
+      { id: "autres", label: "Revenus d'épargne - Autres" , transfer: true },
     ],
   },
 ];
@@ -182,20 +182,18 @@ export function taxSub(catId, subId, taxo = TAXONOMIE) {
  * les paramètres de la nomenclature qui décident, comme pour
  * l'incompressible.
  */
+export function subTransfer(catId, subId, taxo = TAXONOMIE) {
+  const c = taxo.find((x) => x.id === catId);
+  if (!c || c.active === false) return false;
+  const s = c.subs.find((x) => x.id === subId);
+  return !!s && s.active !== false && !!s.transfer;
+}
+
 export function subRecurring(catId, subId, taxo = TAXONOMIE) {
   if (!catId || !subId) return false;
   return !!taxSub(catId, subId, taxo)?.recurring;
 }
 
-
-/** Une sous-catégorie marquée « transfert interne » déplace l'argent entre
- * les poches du même patrimoine (épargne bancaire, comptes à comptes) :
- * ce n'est ni un revenu ni une dépense de budget — voir budget.js →
- * savingsFlowOfMonth et estimation.js (exclusion de la provision). */
-export function subTransfert(catId, subId, taxo = TAXONOMIE) {
-  if (!catId || !subId) return false;
-  return !!taxSub(catId, subId, taxo)?.transfert;
-}
 /** Nature effective d'une sous-catégorie (redéfinition possible). */
 export function subNature(cat, sub) {
   if (!cat) return null;
@@ -324,7 +322,7 @@ export function subByOperation(catId, opLabel, taxo = TAXONOMIE) {
 export const TAXO_FLAGS_VERSION = 2;
 
 /**
- * Fusionne les marqueurs 🔁/🔒/transfert des sous-catégories de référence sur une
+ * Fusionne les marqueurs 🔁/🔒 des sous-catégories de référence sur une
  * nomenclature existante — fonction pure. La fusion ne retire jamais de
  * marqueur : un indicateur déjà à `true` (choix de l'utilisateur) est
  * conservé ; les sous-catégories personnalisées (hors nomenclature de
@@ -343,7 +341,7 @@ export function applyDefaultFlags(taxo) {
           ...s,
           recurring: !!s.recurring || !!refSub.recurring,
           incompressible: !!s.incompressible || !!refSub.incompressible,
-          transfert: !!s.transfert || !!refSub.transfert,
+          transfer: !!s.transfer || !!refSub.transfer,
         };
       }),
     };
@@ -429,7 +427,7 @@ export function addSubcategory(taxo, catId, { label, recurring = false, incompre
  * (passer l'ancienne valeur pour ne changer qu'un indicateur).
  * @throws {Error} catégorie ou sous-catégorie inconnue
  */
-export function setSubFlags(taxo, catId, subId, { recurring, incompressible }) {
+export function setSubFlags(taxo, catId, subId, { recurring, incompressible, transfer }) {
   const cat = taxo.find((c) => c.id === catId);
   if (!cat) throw new Error("Catégorie inconnue : " + catId);
   if (!cat.subs.some((s) => s.id === subId)) throw new Error("Sous-catégorie inconnue : " + subId);
@@ -439,7 +437,9 @@ export function setSubFlags(taxo, catId, subId, { recurring, incompressible }) {
       : {
           ...c,
           subs: c.subs.map((s) =>
-            s.id !== subId ? s : { ...s, recurring: !!recurring, incompressible: !!incompressible }
+            s.id !== subId
+              ? s
+              : { ...s, recurring: !!recurring, incompressible: !!incompressible, transfer: !!transfer }
           ),
         }
   );

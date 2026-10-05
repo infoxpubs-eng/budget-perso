@@ -193,7 +193,7 @@ function BalanceTooltip({ active, payload }) {
               <span className="text-slate-600">
                 {e.label}
                 {e.inc ? " 🔒" : ""}
-                {e.rec ? " 🔁" : " ✨"}
+                {e.transfer ? " ⇄" : e.rec ? " 🔁" : " ✨"}
               </span>
               <span className={e.type === "in" ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
                 {e.type === "in" ? "+" : "−"}{fmt(Math.abs(e.amount))}
@@ -265,8 +265,6 @@ export default function App() {
   // (simStart) ; l'historique enchaîne les mois jusqu'au mois courant,
   // dont le solde d'ouverture devient le solde résultant.
   const loadedList = useMemo(() => loadedMonths(state), [state]);
-  // Trajectoire de l'épargne sur les mois chargés : flux net par mois et cumul.
-  const savingsHist = useMemo(() => savingsFlowHistory(state), [state]);
   const anchor = useMemo(() => simStart(state, start.y, start.m), [state, start]);
 
   const hist = useMemo(() => {
@@ -533,11 +531,6 @@ export default function App() {
   // Réglages du modèle (fenêtre, seuil de présence, statistique) : persistés
   // avec l'état, éditables dans la console 🛠️ Admin.
   const est = state.estimation ?? DEFAULT_ESTIMATION;
-  // Transferts internes du mois affiché (versements / retraits d'épargne) :
-  // ils s'enchaînent dans le solde mais ne sont ni revenus ni dépenses —
-  // réels sur un mois chargé, prévus (écritures planifiées) sur un mois simulé.
-  const epargne = { versements: sim.transfertOut, retraits: sim.transfertIn, net: sim.epargne };
-  const epargnePrevue = sim.hasData !== true && epargne.versements + epargne.retraits > 0;
   const prov = useMemo(
     () => remainingProvision({ extras: state.extras, expenses: state.expenses, y: sim.y, m: sim.m, settings: est, taxo: state.taxonomie }),
     [state.extras, state.expenses, state.estimation, sim.y, sim.m]
@@ -662,32 +655,10 @@ export default function App() {
         {/* ------------------------------ APERÇU ------------------------------ */}
         {tab === "apercu" && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-8">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-7">
               <Kpi label="Solde en début de mois" value={fmt(sim.start)} />
-              <Kpi
-                label="Revenus du mois"
-                value={"+ " + fmt(sim.totalIn - epargne.retraits)}
-                tone="good"
-                hint={epargne.retraits > 0 ? "Hors retraits d'épargne : + " + fmt(epargne.retraits) : null}
-              />
-              <Kpi
-                label="Dépenses du mois"
-                value={"− " + fmt(sim.totalOut - epargne.versements)}
-                tone="bad"
-                hint={epargne.versements > 0 ? "Hors versements d'épargne : − " + fmt(epargne.versements) : null}
-              />
-              <Kpi
-                label="Épargne du mois"
-                value={epargne.net > 0 ? "+ " + fmt(epargne.net) : epargne.net < 0 ? "− " + fmt(-epargne.net) : fmt(0)}
-                tone={epargne.net > 0 ? "good" : epargne.net < 0 ? "bad" : null}
-                hint={
-                  epargne.versements + epargne.retraits === 0
-                    ? "Transferts internes (hors budget)"
-                    : epargne.net < 0
-                      ? (epargnePrevue ? "Prévu — " : "") + "⚠️ Réserve sollicitée : retraits " + fmt(epargne.retraits) + " · versements " + fmt(epargne.versements)
-                      : (epargnePrevue ? "Prévu — " : "") + "Versements " + fmt(epargne.versements) + (epargne.retraits > 0 ? " · retraits " + fmt(epargne.retraits) : "")
-                }
-              />
+              <Kpi label="Revenus du mois" value={"+ " + fmt(sim.totalIn)} tone="good" />
+              <Kpi label="Dépenses du mois" value={"− " + fmt(sim.totalOut)} tone="bad" />
               <Kpi
                 label="Solde actuel"
                 value={fmt(soldeActuel)}
@@ -701,6 +672,22 @@ export default function App() {
                 hint={sim.end >= sim.start ? "Évolution : + " + fmt(sim.end - sim.start) : "Évolution : − " + fmt(sim.start - sim.end)}
               />
               <Kpi
+                label="Flux épargne net"
+                value={
+                  (sim.transferIn ?? 0) === 0 && (sim.transferOut ?? 0) === 0
+                    ? "—"
+                    : (sim.fluxEpargne >= 0 ? "+ " : "− ") + fmt(Math.abs(sim.fluxEpargne))
+                }
+                tone={sim.fluxEpargne > 0 ? "good" : sim.fluxEpargne < 0 ? "bad" : undefined}
+                hint={
+                  (sim.transferIn ?? 0) === 0 && (sim.transferOut ?? 0) === 0
+                    ? "Aucun transfert interne ce mois-ci"
+                    : sim.fluxEpargne < 0
+                      ? "⚠️ Réserve sollicitée (retraits " + fmt(sim.transferIn) + " > versements " + fmt(sim.transferOut) + ")"
+                      : "Versements " + fmt(sim.transferOut) + " − retraits " + fmt(sim.transferIn) + " (hors budget)"
+                }
+              />
+              <Kpi
                 label="Solde fin de mois probable"
                 value={fmt(sim.end - prov.total)}
                 tone={sim.end - prov.total >= 0 ? "accent" : "bad"}
@@ -712,58 +699,7 @@ export default function App() {
                       : "Importez un relevé pour estimer vos habitudes"
                 }
               />
-              <Kpi
-                label="Tenue sans la réserve"
-                value={fmt(sim.end - prov.total - epargne.net)}
-                tone={sim.end - prov.total - epargne.net >= 0 ? "good" : "bad"}
-                hint={
-                  "Solde fin de mois probable hors flux d'épargne" +
-                  (epargne.net < 0
-                    ? " — le mois " + (sim.end - prov.total - epargne.net < 0 ? "ne tient pas" : "tient") + " sans les " + fmt(-epargne.net) + " de retraits"
-                    : epargne.net > 0
-                      ? " (épargne de " + fmt(epargne.net) + " déjà mise de côté)"
-                      : "")
-                }
-              />
             </div>
-
-            {savingsHist.length > 0 && (
-              <Card>
-                <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-                  <h2 className="font-semibold">Épargne — trajectoire sur les mois chargés</h2>
-                  {(() => {
-                    const last = savingsHist[savingsHist.length - 1];
-                    return (
-                      <span className={"text-xs font-semibold " + (last.cumul > 0 ? "text-emerald-600" : last.cumul < 0 ? "text-rose-600" : "text-slate-500")}>
-                        {savingsHist.length} mois chargé(s) · cumul {last.cumul > 0 ? "+ " + fmt(last.cumul) : last.cumul < 0 ? "− " + fmt(-last.cumul) : fmt(0)}
-                        {last.cumul < 0 ? " — la réserve a été sollicitée sur la période" : ""}
-                      </span>
-                    );
-                  })()}
-                </div>
-                <p className="mb-2 text-xs text-slate-500">
-                  Flux net vers l'épargne (versements − retraits) tel que le relevé le montre ; le cumul mesure le progrès vers un budget qui épargne sans piocher dans la réserve.
-                </p>
-                <div className="h-44">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={savingsHist.map((h) => ({ mois: MONTHS[h.m].slice(0, 3) + " " + String(h.y).slice(2), net: Math.round(h.net * 100) / 100, cumul: Math.round(h.cumul * 100) / 100 }))}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="mois" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => (Math.abs(v) >= 1000 ? (v / 1000) + "k" : String(v))} />
-                      <Tooltip
-                        formatter={(v, name) => [fmt(v) + " €", name === "net" ? "Flux du mois" : "Cumul"]}
-                        labelStyle={{ fontWeight: 600 }}
-                      />
-                      <Bar dataKey="net" radius={[3, 3, 0, 0]}>
-                        {savingsHist.map((h, i) => (
-                          <Cell key={i} fill={h.net > 0 ? "#10b981" : h.net < 0 ? "#f43f5e" : "#cbd5e1"} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </Card>
-            )}
 
             <Card>
               <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
@@ -830,7 +766,7 @@ export default function App() {
                               <div className="font-semibold text-slate-600">{label} {MONTHS[sim.m]}</div>
                               {(day ? day.events : []).map((e, i) => (
                                 <div key={i} className="mt-1 flex justify-between gap-6">
-                                  <span>{e.label}{e.inc ? " 🔒" : ""}{e.rec ? " 🔁" : " ✨"}</span>
+                                  <span>{e.label}{e.inc ? " 🔒" : ""}{e.transfer ? " ⇄" : e.rec ? " 🔁" : " ✨"}</span>
                                   <span className={e.type === "in" ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
                                     {e.type === "in" ? "+" : "−"}{fmt(Math.abs(e.amount))}
                                   </span>
@@ -1898,6 +1834,7 @@ function AdminPanel({ state, setState, prov, simLabel }) {
       taxonomie: setSubFlags(s.taxonomie ?? taxo, cid, sub.id, {
         recurring: flag === "recurring" ? !sub.recurring : !!sub.recurring,
         incompressible: flag === "incompressible" ? !sub.incompressible : !!sub.incompressible,
+        transfer: flag === "transfer" ? !sub.transfer : !!sub.transfer,
       }),
     }));
 
@@ -2025,7 +1962,9 @@ function AdminPanel({ state, setState, prov, simLabel }) {
         <Card>
           <h2 className="mb-1 font-semibold">Nomenclature — catégories et sous-catégories</h2>
           <p className="mb-4 text-xs text-slate-500">
-            Cliquez sur 🔁 ou 🔒 pour marquer une sous-catégorie récurrente ou incompressible ;
+            Cliquez sur 🔁, 🔒 ou ⇄ pour marquer une sous-catégorie récurrente, incompressible ou
+            « transfert interne » (virement d'épargne : les mouvements du couple comptent dans le
+            solde mais pas dans les totaux budgétaires — ils alimentent le KPI « Flux épargne net ») ;
             sur ✏️ pour renommer ; sur ⏸️ pour désactiver (▶️ pour réactiver).
             Une sous-catégorie incompressible rend toutes ses dépenses incompressibles dans les
             totaux du mois et coche automatiquement « incompressible » dans les formulaires.
@@ -2150,6 +2089,18 @@ function AdminPanel({ state, setState, prov, simLabel }) {
                                 }
                               >
                                 🔁 récurrente
+                              </button>
+                              <button
+                                title="Marquer comme transfert interne (virement d'épargne : hors budget, suivi par le KPI « Flux épargne net »)"
+                                onClick={() => toggleFlag(c.id, s, "transfer")}
+                                className={
+                                  "rounded-md px-2 py-1 text-xs font-medium transition " +
+                                  (s.transfer
+                                    ? "bg-teal-600 text-white"
+                                    : "bg-slate-100 text-slate-400 hover:bg-slate-200")
+                                }
+                              >
+                                ⇄ transfert
                               </button>
                               <button
                                 title="Marquer comme incompressible"

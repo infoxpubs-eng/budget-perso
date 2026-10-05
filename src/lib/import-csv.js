@@ -35,7 +35,15 @@
  * Module sans dépendance React : testable isolément (voir import-csv.test.js).
  */
 
-import { TAXONOMIE, catByLabel, subByLabel, subByOperation, slugify, subIncompressible, subRecurring, addCategory, addSubcategory, taxSub, normalizeLabel } from "./taxonomie.js";
+import { TAXONOMIE, catByLabel, subByLabel, subByOperation, slugify, subIncompressible, subRecurring, subTransfer, addCategory, addSubcategory, taxSub, normalizeLabel } from "./taxonomie.js";
+
+/**
+ * Libellés typiques des virements d'épargne (Livret A, CSL, PEL…) : une
+ * ligne dont le couple est inconnu mais dont le libellé opération parle
+ * d'un livret d'épargne est rangée sur le couple « transfert interne ⇄ »
+ * correspondant (versement si débit, retrait si crédit).
+ */
+export const EPARGNE_LABEL_RE = /\b(?:livret\s*a|c\.?s\.?l\.?|compte\s+sur\s+livret|pel|l\.?d\.?d\.?)\b|livrets?\b/i;
 
 /* ------------------------------------------------------------------ */
 /* Analyse CSV                                                          */
@@ -134,14 +142,25 @@ export function parseCsv(text, taxo = TAXONOMIE) {
     const amount = parseFrAmount(cells[iAmount]);
     const catLabel = cells[iCat] ?? "";
     const subLabel = iSub >= 0 ? cells[iSub] ?? "" : "";
-    const cat = catByLabel(catLabel, taxo);
+    let cat = catByLabel(catLabel, taxo);
     // Libellé de l'opération : aide à déterminer la sous-catégorie quand la
     // colonne Sous-Catégorie est inconnue (recherche par inclusion).
     const opLabel = iLabel >= 0 ? cells[iLabel] ?? "" : "";
-    const sub = cat
+    let sub = cat
       ? (subByLabel(cat.id, subLabel, taxo) ??
         (opLabel !== "" ? subByOperation(cat.id, opLabel, taxo) : undefined))
       : undefined;
+    // Virement d'épargne déguisé (couple inconnu, libellé type « Livret A »,
+    // « CSL », « PEL ») : rangé sur le couple « transfert interne ⇄ » de la
+    // nomenclature — versement (dépense) si débit, retrait (revenu) si crédit.
+    if (!sub && EPARGNE_LABEL_RE.test(opLabel)) {
+      const epCat = taxo.find((c) => c.id === (amount < 0 ? "epargne" : "revenus-epargne"));
+      const epSub = epCat?.subs.find((x) => subTransfer(epCat.id, x.id, taxo));
+      if (epCat && epSub) {
+        cat = epCat;
+        sub = epSub;
+      }
+    }
 
     if (!date || amount === undefined || amount === 0) {
       ignored++;

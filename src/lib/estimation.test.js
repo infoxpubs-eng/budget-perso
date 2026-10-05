@@ -1,4 +1,3 @@
-import { TAXONOMIE } from "./taxonomie.js";
 import { describe, it, expect } from "vitest";
 import {
   medianOf,
@@ -11,6 +10,7 @@ import {
   TENDENCY_WINDOW,
   PRESENCE_MIN,
 } from "./estimation.js";
+import { TAXONOMIE } from "./taxonomie.js";
 
 /* Données synthétiques uniquement : m est 0-indexé (août = 7, sept = 8). */
 
@@ -268,31 +268,53 @@ describe("remainingProvision — réglages", () => {
   });
 });
 
+/* ------------------------------------------------------------------ */
+/* v0.24 — Transferts internes ⇄ exclus de la provision               */
+/* ------------------------------------------------------------------ */
 
-describe("remainingProvision — transferts internes exclus", () => {
-  it("un couple marqué transfert n'est pas provisionné (épargne ≠ habitude)", () => {
-    const extras = [
-      // 3 mois complets de versements d'épargne réguliers…
-      { y: 2026, m: 3, day: 5, amount: 1000, cat: "epargne", sub: "epargne-bancaire", label: "Livret A" },
-      { y: 2026, m: 4, day: 5, amount: 1000, cat: "epargne", sub: "epargne-bancaire", label: "Livret A" },
-      { y: 2026, m: 5, day: 5, amount: 1000, cat: "epargne", sub: "epargne-bancaire", label: "Livret A" },
-      // …et une vraie habitude
-      { y: 2026, m: 3, day: 2, amount: 50, cat: "loisirs", sub: "restaurants", label: "Resto" },
-      { y: 2026, m: 4, day: 2, amount: 50, cat: "loisirs", sub: "restaurants", label: "Resto" },
-      { y: 2026, m: 5, day: 2, amount: 50, cat: "loisirs", sub: "restaurants", label: "Resto" },
-    ];
-    const prov = remainingProvision({ extras, expenses: [], y: 2026, m: 6, taxo: TAXONOMIE });
-    expect(prov.lines.some((l) => l.cat === "epargne")).toBe(false);
-    expect(prov.lines.some((l) => l.sub === "restaurants")).toBe(true);
+describe("remainingProvision — transferts internes", () => {
+  const x = (y, m, day, amount, cat = "loisirs", sub = "taxis") => ({
+    id: y + "-" + m + "-" + day, label: "x", amount, day, y, m, cat, sub,
   });
 
-  it("sans nomenclature explicite, la référence exclut quand même les transferts", () => {
+  it("un couple ⇄ n'apprend aucune tendance (versements d'épargne ≠ habitude)", () => {
     const extras = [
-      { y: 2026, m: 3, day: 5, amount: 1000, cat: "epargne", sub: "epargne-bancaire", label: "Livret A" },
-      { y: 2026, m: 4, day: 5, amount: 1000, cat: "epargne", sub: "epargne-bancaire", label: "Livret A" },
-      { y: 2026, m: 5, day: 5, amount: 1000, cat: "epargne", sub: "epargne-bancaire", label: "Livret A" },
+      x(2026, 3, 5, 3000, "epargne", "epargne-bancaire"),
+      x(2026, 4, 5, 2200, "epargne", "epargne-bancaire"),
+      x(2026, 5, 5, 800, "epargne", "epargne-bancaire"),
+      x(2026, 6, 5, 200, "epargne", "epargne-bancaire"),
     ];
-    const prov = remainingProvision({ extras, expenses: [], y: 2026, m: 6 });
-    expect(prov.lines.some((l) => l.cat === "epargne")).toBe(false);
+    const p = remainingProvision({ extras, expenses: [], y: 2026, m: 9 });
+    expect(p.total).toBe(0);
+    expect(p.lines).toHaveLength(0);
+  });
+
+  it("le déjà-dépensé du mois courant ignore aussi les transferts ⇄", () => {
+    const extras = [
+      x(2026, 4, 2, 100),
+      x(2026, 5, 2, 100),
+      x(2026, 6, 2, 100),
+      x(2026, 9, 5, 3000, "epargne", "epargne-bancaire"), // versement ce mois-ci
+    ];
+    const p = remainingProvision({ extras, expenses: [], y: 2026, m: 9 });
+    // Tendance taxis = 100 ; le versement de 3000 ne fait ni tendance ni dépense.
+    expect(p.lines.find((l) => l.sub === "taxis")?.tendency).toBe(100);
+    expect(p.lines.find((l) => l.sub === "epargne-bancaire")).toBeUndefined();
+  });
+
+  it("le marqueur ⇄ est honoré depuis la nomenclature passée (taxo)", () => {
+    // Un couple NON transfert par défaut devient transfert via la nomenclature.
+    const taxo = TAXONOMIE.map((c) =>
+      c.id === "voyages-transports"
+        ? { ...c, subs: c.subs.map((s) => (s.id === "taxis" ? { ...s, transfer: true } : s)) }
+        : c
+    );
+    const extras = [
+      x(2026, 4, 2, 100, "voyages-transports"),
+      x(2026, 5, 2, 100, "voyages-transports"),
+      x(2026, 6, 2, 100, "voyages-transports"),
+    ];
+    const p = remainingProvision({ extras, expenses: [], y: 2026, m: 9, taxo });
+    expect(p.total).toBe(0);
   });
 });
