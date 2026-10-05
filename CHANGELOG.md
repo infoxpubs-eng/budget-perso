@@ -13,6 +13,12 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Alertes d'échéance (notifications en amont des gros débits)
 - Réglages par couple du modèle prédictif (fenêtre / statistique individuelles) — en réserve : voir comment le réglage global évolue déjà à l'usage
 
+## [0.26.0] — 2026-10-05
+
+### Ajouté
+
+- **KPI « Tenue sans la réserve » (Aperçu)** : solde de fin de mois probable **hors tout flux d'épargne** (`fin de mois probable − flux net d'épargne du mois`). C'est le juge de paix de l'objectif « vivre sans la réserve » : vert quand le mois tient seul, rouge quand il ne tient que grâce aux retraits d'épargne — l'info-bulle le dit explicitement (« le mois ne tient pas sans les X € de retraits »).
+
 ## [0.25.0] — 2026-10-05
 
 ### Ajouté

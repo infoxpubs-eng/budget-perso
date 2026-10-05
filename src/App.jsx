@@ -662,7 +662,7 @@ export default function App() {
         {/* ------------------------------ APERÇU ------------------------------ */}
         {tab === "apercu" && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-7">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-8">
               <Kpi label="Solde en début de mois" value={fmt(sim.start)} />
               <Kpi
                 label="Revenus du mois"
@@ -710,6 +710,19 @@ export default function App() {
                     : state.extras.length > 0
                       ? "Habitudes non planifiées : aucune provision"
                       : "Importez un relevé pour estimer vos habitudes"
+                }
+              />
+              <Kpi
+                label="Tenue sans la réserve"
+                value={fmt(sim.end - prov.total - epargne.net)}
+                tone={sim.end - prov.total - epargne.net >= 0 ? "good" : "bad"}
+                hint={
+                  "Solde fin de mois probable hors flux d'épargne" +
+                  (epargne.net < 0
+                    ? " — le mois " + (sim.end - prov.total - epargne.net < 0 ? "ne tient pas" : "tient") + " sans les " + fmt(-epargne.net) + " de retraits"
+                    : epargne.net > 0
+                      ? " (épargne de " + fmt(epargne.net) + " déjà mise de côté)"
+                      : "")
                 }
               />
             </div>
