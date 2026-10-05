@@ -98,8 +98,8 @@ function Kpi({ label, value, hint, tone }) {
   return (
     <Card>
       <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={"mt-1 text-2xl font-bold " + toneCls}>{value}</div>
-      {hint && <div className="mt-1 text-xs text-slate-500">{hint}</div>}
+      <div className={"mt-1 font-bold tabular-nums " + toneCls} style={{ fontSize: "clamp(1.05rem, 1.9vw, 1.5rem)", whiteSpace: "nowrap" }}>{value}</div>
+      {hint && <div className="mt-1 text-xs leading-snug text-slate-500">{hint}</div>}
     </Card>
   );
 }

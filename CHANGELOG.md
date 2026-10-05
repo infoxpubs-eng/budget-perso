@@ -13,6 +13,12 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Alertes d'échéance (notifications en amont des gros débits)
 - Réglages par couple du modèle prédictif (fenêtre / statistique individuelles) — en réserve : voir comment le réglage global évolue déjà à l'usage
 
+## [0.28.0] — 2026-10-05
+
+### Corrigé
+
+- **Débordement des montants dans les cartes KPI** : avec 8 KPI en grille sur un écran étroit, les montants à 4 chiffres débordaient de leur carte. Le montant s'adapte désormais à la largeur disponible (`clamp` ~17→24 px selon l'écran), aligné en chiffres tabulaires, sans retour à la ligne ; l'info-bulle respire aussi mieux (`leading-snug`).
+
 ## [0.27.0] — 2026-10-05
 
 ### Ajouté
