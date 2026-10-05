@@ -25,6 +25,8 @@ import {
   simulate,
   monthSim,
   loadedMonths,
+  hasRealData,
+  realMonthSim,
   simStart,
   migrateState,
   monthlyExpenses,
@@ -271,7 +273,13 @@ export default function App() {
     let y = anchor.y;
     let m = anchor.m;
     while (y < start.y || (y === start.y && m < start.m)) {
-      const month = monthSim(state, y, m, carry);
+      // Mois chargé (🧾) : flux RÉELS du relevé — le solde de départ est la
+      // balance à la date chargée la plus lointaine, à laquelle s'ajoutent
+      // les lignes importées ; les récurrentes planifiées ne sont pas
+      // re-simulées sur un mois où elles ont (ou n'ont pas) eu lieu.
+      const month = hasRealData(state, y, m)
+        ? realMonthSim(state, y, m, carry)
+        : monthSim(state, y, m, carry);
       months.push(month);
       carry = month.end;
       const d = new Date(y, m + 1, 1);
@@ -281,7 +289,29 @@ export default function App() {
     return { months, opening: carry };
   }, [state, anchor, start]);
 
-  const sims = useMemo(() => simulate(state, start.y, start.m, hist.opening), [state, start, hist.opening]);
+  const sims = useMemo(() => {
+    // Mois courant chargé : réel jusqu'à aujourd'hui, écritures planifiées
+    // sans occurrence en prévision pour la fin du mois ; les mois suivants
+    // restent simulés par les écritures planifiées, enchaînés dessus.
+    if (hasRealData(state, start.y, start.m)) {
+      const out = [];
+      let carry = hist.opening;
+      let y = start.y;
+      let m = start.m;
+      for (let i = 0; i < 12; i++) {
+        const month = i === 0
+          ? realMonthSim(state, y, m, carry, { today: now.getDate() })
+          : monthSim(state, y, m, carry);
+        out.push(month);
+        carry = month.end;
+        const d = new Date(y, m + 1, 1);
+        y = d.getFullYear();
+        m = d.getMonth();
+      }
+      return out;
+    }
+    return simulate(state, start.y, start.m, hist.opening);
+  }, [state, start, hist.opening]);
 
   // ----- Sélecteur de mois : historique + 12 mois simulés + relevé au-delà -----
   const monthsAll = useMemo(() => {
@@ -293,7 +323,7 @@ export default function App() {
     let carry = lastSim.end;
     for (const d of loadedList) {
       if (d.y > lastSim.y || (d.y === lastSim.y && d.m > lastSim.m)) {
-        const month = monthSim(state, d.y, d.m, carry);
+        const month = realMonthSim(state, d.y, d.m, carry);
         tail.push(month);
         carry = month.end;
       }
@@ -310,7 +340,12 @@ export default function App() {
     return filtered.length > 0 ? filtered : monthsAll; // repli si aucun mois chargé
   }, [monthsAll, onlyLoaded]);
 
-  const sim = options.find((s) => s.y + "-" + s.m === selKey) ?? options[0] ?? sims[0];
+  // Par défaut : mois courant (le plus utile au quotidien), sinon premier mois.
+  const sim =
+    options.find((s) => s.y + "-" + s.m === selKey) ??
+    options.find((s) => s.y === start.y && s.m === start.m) ??
+    options[0] ??
+    sims[0];
   const optIdx = options.indexOf(sim);
   // Index du mois affiché dans les 12 mois simulés (les formulaires ne
   // proposent que la fenêtre) ; 0 si le mois affiché est hors fenêtre.
@@ -320,7 +355,12 @@ export default function App() {
   // (jour clampé au nombre de jours du mois ; projection pour un mois
   // autre que le mois en cours).
   const todayDay = Math.min(now.getDate(), sim.daily.length - 1);
-  const soldeActuel = sim.daily[todayDay].solde;
+  // Mois chargé : solde « actuel » = ouverture + cumul des flux RÉELS jusqu'à
+  // aujourd'hui (la prévision des jours restants ne pollue pas la mesure).
+  const soldeActuel =
+    sim.realSoFar !== undefined && sim.y === now.getFullYear() && sim.m === now.getMonth()
+      ? sim.start + sim.realSoFar
+      : sim.daily[todayDay].solde;
   const isCurrentMonth = sim.y === now.getFullYear() && sim.m === now.getMonth();
 
   const setSolde = (n) => setState((s) => ({ ...s, soldeDepart: n }));

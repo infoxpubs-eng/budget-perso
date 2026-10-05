@@ -13,6 +13,18 @@ et le projet suit les principes du [Semantic Versioning](https://semver.org/lang
 - Alertes d'échéance (notifications en amont des gros débits)
 - Réglages par couple du modèle prédictif (fenêtre / statistique individuelles) — en réserve : voir comment le réglage global évolue déjà à l'usage
 
+## [0.23.0] — 2026-10-05
+
+### Ajouté
+
+- **Chaînage réel des mois chargés (🧾)** : les mois de l'historique disposant de données importées affichent désormais les **flux réels du relevé** (occurrences d'historique des écritures planifiées à date et montant observés, dépenses exceptionnelles, revenus uniques) — les récurrentes planifiées n'y sont plus re-simulées. Les mois sans données restent simulés par les écritures planifiées, et l'enchaînement de solde se fait de mois chargé en mois chargé.
+- **« Solde de départ » = balance à la date chargée la plus lointaine** : la case consigne la balance à la première date du relevé (plus un solde par mois) ; l'ajout des lignes réellement chargées restitue le solde actuel **au centime**. Le mois courant chargé affiche le réel jusqu'à aujourd'hui (`realSoFar`) puis les écritures planifiées sans occurrence en prévision pour la fin du mois ; le KPI « Solde actuel » vaut alors ancre + cumul réel, exact au centime.
+- Nouvelles fonctions dans `src/lib/budget.js` : `hasRealData`, `loadedMonths`, `realTransactionsOfMonth`, `realMonthSim` (partage du cœur `buildMonth` avec `monthSim`).
+
+### Corrigé
+
+- Le mois affiché par défaut après import est désormais le **mois courant** (et non le premier mois de l'historique).
+
 ## [0.22.0] — 2026-10-03
 
 ### Ajouté

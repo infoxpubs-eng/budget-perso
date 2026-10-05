@@ -372,41 +372,19 @@ export function recurringMonthTotals(state, y, m) {
  * fenêtre de 12 mois).
  */
 export function monthSim(state, y, m, opening) {
-  const dim = daysInMonth(y, m);
-  const tx = transactionsOfMonth(state, y, m);
-  const daily = [];
-  let bal = opening;
-  let totalIn = 0;
-  let totalOut = 0;
-  let min = opening;
-  let minDay = 0;
-  daily.push({ day: 0, solde: bal, date: "1er " + MONTHS[m], events: [] });
-  for (let day = 1; day <= dim; day++) {
-    const events = tx.filter((t) => t.day === day);
-    for (const e of events) {
-      bal += e.amount;
-      if (e.type === "in") totalIn += e.amount;
-      else totalOut += -e.amount;
-    }
-    daily.push({ day, solde: bal, date: day + " " + MONTHS[m], events });
-    if (bal < min) {
-      min = bal;
-      minDay = day;
-    }
-  }
-  return {
-    y,
-    m,
-    label: monthLabel(y, m),
-    start: opening,
-    end: bal,
-    min,
-    minDay,
-    totalIn,
-    totalOut,
-    tx,
-    daily,
-  };
+  return buildMonth(y, m, opening, transactionsOfMonth(state, y, m));
+}
+
+/**
+ * Simulation d'un mois CHARGÉ sur des données réelles : les flux du mois
+ * sont les transactions réellement importées (occurrences d'historique,
+ * exceptionnels, revenus uniques). Avec `today` (mois courant), les
+ * écritures planifiées sans occurrence complètent la fin du mois en
+ * prévision ; `realSoFar` expose le cumul réel jusqu'à ce jour pour un
+ * « solde actuel » exact.
+ */
+export function realMonthSim(state, y, m, opening, { today = null } = {}) {
+  return buildMonth(y, m, opening, realTransactionsOfMonth(state, y, m, { today }), { today });
 }
 
 /**
@@ -421,7 +399,187 @@ export function loadedMonths(state) {
   };
   for (const x of state.extras ?? []) add(x.y, x.m);
   for (const i of state.incomes ?? []) if (i.mode === "unique") add(i.y, i.m);
+  // Les occurrences réelles rattachées aux écritures planifiées (historique
+  // des imports) chargent aussi leur mois : un mois couvert uniquement par
+  // des récurrences est un mois réel.
+  for (const e of state.expenses ?? []) for (const h of e.history ?? []) add(h.y, h.m);
+  for (const i of state.incomes ?? []) for (const h of i.history ?? []) add(h.y, h.m);
   return [...byKey.values()].sort((a, b) => a.y - b.y || a.m - b.m);
+}
+
+/**
+ * Le mois (y, m) contient-il des données réelles chargées (relevé importé) :
+ * dépense exceptionnelle, revenu unique ou occurrence d'historique ?
+ */
+export function hasRealData(state, y, m) {
+  for (const x of state.extras ?? []) if (x.y === y && x.m === m) return true;
+  for (const i of state.incomes ?? []) {
+    if (i.mode === "unique" && i.y === y && i.m === m) return true;
+    for (const h of i.history ?? []) if (h.y === y && h.m === m) return true;
+  }
+  for (const e of state.expenses ?? [])
+    for (const h of e.history ?? []) if (h.y === y && h.m === m) return true;
+  return false;
+}
+
+/**
+ * Transactions RÉELLES du mois (y, m), reconstruites des données chargées :
+ * occurrences d'historique des écritures planifiées (dates et montants
+ * observés), dépenses exceptionnelles et revenus uniques. Les écritures
+ * planifiées ne sont PAS re-planifiées pour un mois chargé : leur occurrence
+ * réelle les remplace (pas de double comptage, pas de récurrente fantôme
+ * sur un mois où elle n'a pas eu lieu).
+ *
+ * Avec `today` (jour du mois courant), les écritures planifiées sans
+ * occurrence réelle ce mois-ci sont ajoutées en prévision pour compléter
+ * le mois : le solde « actuel » (jour `today`) n'en compte que les
+ * occurrences réelles jusqu'à ce jour.
+ */
+export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
+  const tx = [];
+  const dim = daysInMonth(y, m);
+  const taxo = state.taxonomie ?? TAXONOMIE;
+  const occurred = new Set(); // écritures ayant une occurrence réelle ce mois
+
+  // Occurrences réelles des écritures planifiées (historique d'import).
+  for (const e of state.expenses) {
+    if (e.freq !== "mensuelle" && e.freq !== "annuelle") continue;
+    for (const h of e.history ?? []) {
+      if (h.y !== y || h.m !== m) continue;
+      occurred.add(e.id);
+      tx.push({
+        day: Math.min(h.day ?? e.day, dim),
+        label: e.label,
+        amount: -(h.amount ?? e.amount),
+        type: "out",
+        cat: e.cat,
+        sub: e.sub,
+        inc: !!e.incompressible || subIncompressible(e.cat, e.sub, taxo),
+        rec: subRecurring(e.cat, e.sub, taxo),
+        real: true,
+      });
+    }
+  }
+  for (const i of state.incomes) {
+    for (const h of i.history ?? []) {
+      if (h.y !== y || h.m !== m) continue;
+      occurred.add(i.id);
+      tx.push({
+        day: Math.min(h.day ?? i.day ?? dim, dim),
+        label: i.label,
+        amount: h.amount ?? i.amount,
+        type: "in",
+        cat: i.cat ?? "revenus-travail",
+        sub: i.sub ?? "salaire-fixe",
+        inc: false,
+        rec: isRecurringIncome(i, taxo),
+        real: true,
+      });
+    }
+  }
+
+  // Dépenses exceptionnelles réelles du mois.
+  for (const x of state.extras ?? []) {
+    if (x.y !== y || x.m !== m) continue;
+    tx.push({
+      day: Math.min(x.day, dim),
+      label: x.label,
+      amount: -x.amount,
+      type: "out",
+      cat: x.cat ?? "logement",
+      sub: x.sub ?? "frais-exceptionnels",
+      inc: !!x.incompressible || subIncompressible(x.cat, x.sub, state.taxonomie),
+      rec: false,
+      real: true,
+    });
+  }
+
+  // Revenus uniques réels du mois.
+  for (const i of state.incomes ?? []) {
+    if (i.mode !== "unique" || i.y !== y || i.m !== m) continue;
+    tx.push({
+      day: Math.min(i.day, dim),
+      label: i.label,
+      amount: i.amount,
+      type: "in",
+      cat: i.cat ?? "revenus-travail",
+      sub: i.sub,
+      inc: false,
+      rec: false,
+      real: true,
+    });
+  }
+
+  // Mois courant : prévision des écritures planifiées sans occurrence réelle
+  // (le relevé ne couvre que le passé — le reste du mois reste à prévoir).
+  if (today !== null) {
+    for (const e of state.expenses) {
+      if (e.freq !== "mensuelle" && e.freq !== "annuelle") continue;
+      if (e.freq === "annuelle" && (e.month ?? 1) - 1 !== m) continue;
+      if (occurred.has(e.id)) continue;
+      tx.push({
+        day: Math.min(e.day, dim),
+        label: e.label,
+        amount: -e.amount,
+        type: "out",
+        cat: e.cat,
+        sub: e.sub,
+        inc: !!e.incompressible || subIncompressible(e.cat, e.sub, taxo),
+        rec: subRecurring(e.cat, e.sub, taxo),
+        real: false,
+      });
+    }
+    for (const i of state.incomes) {
+      if (i.mode === "unique" || occurred.has(i.id)) continue;
+      if (i.mode === "salaire") {
+        const day = salaryPayDay(y, m);
+        const rec = isRecurringIncome(i, taxo);
+        tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec, real: false });
+        if (i.treizieme && (m === 5 || m === 10)) {
+          tx.push({ day, label: i.label + " · 13ᵉ mois (½)", amount: i.amount / 2, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec, real: false });
+        }
+        if ((i.bonus ?? 0) > 0 && m === 2) {
+          tx.push({ day, label: i.label + " · bonus estimé", amount: i.bonus, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec, real: false });
+        }
+      } else {
+        tx.push({ day: Math.min(i.day, dim), label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec: isRecurringIncome(i, taxo), real: false });
+      }
+    }
+  }
+
+  tx.sort((a, b) => a.day - b.day);
+  return tx;
+}
+
+/**
+ * Cœur de `monthSim` / `realMonthSim` : enchaîne des transactions données
+ * jour après jour sur un solde d'ouverture.
+ */
+function buildMonth(y, m, opening, tx, { today = null } = {}) {
+  const dim = daysInMonth(y, m);
+  const daily = [];
+  let bal = opening;
+  let totalIn = 0;
+  let totalOut = 0;
+  let min = opening;
+  let minDay = 0;
+  let realSoFar = 0; // somme des flux RÉELS jusqu'au jour `today` (mois courant)
+  daily.push({ day: 0, solde: bal, date: "1er " + MONTHS[m], events: [] });
+  for (let day = 1; day <= dim; day++) {
+    const events = tx.filter((t) => t.day === day);
+    for (const e of events) {
+      bal += e.amount;
+      if (e.type === "in") totalIn += e.amount;
+      else totalOut += -e.amount;
+      if (today !== null && day <= today && e.real) realSoFar += e.amount;
+    }
+    daily.push({ day, solde: bal, date: day + " " + MONTHS[m], events });
+    if (bal < min) {
+      min = bal;
+      minDay = day;
+    }
+  }
+  return { y, m, label: monthLabel(y, m), start: opening, end: bal, min, minDay, totalIn, totalOut, tx, daily, realSoFar };
 }
 
 /**

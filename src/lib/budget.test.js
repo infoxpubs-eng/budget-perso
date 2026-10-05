@@ -13,6 +13,9 @@ import {
   simulate,
   monthSim,
   loadedMonths,
+  hasRealData,
+  realTransactionsOfMonth,
+  realMonthSim,
   simStart,
   monthlyExpenses,
   isRecurringExpense,
@@ -972,3 +975,110 @@ describe("récurrence du modèle", () => {
   });
 });
 
+/* ------------------------------------------------------------------ */
+/* Chaînage réel des mois chargés (v0.23)                              */
+/* ------------------------------------------------------------------ */
+
+describe("hasRealData / loadedMonths — données réelles", () => {
+  it("hasRealData : extra, revenu unique ou occurrence d'historique", () => {
+    const st = {
+      expenses: [{ id: "e1", label: "Loyer", amount: 850, day: 3, cat: "logement", sub: "loyers-charges", freq: "mensuelle",
+        history: [{ y: 2026, m: 7, day: 3, amount: 850 }] }],
+      incomes: [],
+      extras: [{ y: 2026, m: 8, day: 12, amount: 45, cat: "loisirs", sub: "restaurants", label: "Resto" }],
+    };
+    expect(hasRealData(st, 2026, 7)).toBe(true); // occurrence d'historique
+    expect(hasRealData(st, 2026, 8)).toBe(true); // extra
+    expect(hasRealData(st, 2026, 9)).toBe(false);
+  });
+
+  it("loadedMonths : un mois couvert uniquement par des occurrences 🔁 est chargé", () => {
+    const st = {
+      expenses: [{ id: "e1", label: "Loyer", amount: 850, day: 3, cat: "logement", sub: "loyers-charges", freq: "mensuelle",
+        history: [{ y: 2026, m: 4, day: 3, amount: 850 }, { y: 2026, m: 5, day: 3, amount: 850 }] }],
+      incomes: [],
+      extras: [],
+    };
+    const loaded = loadedMonths(st);
+    expect(loaded).toHaveLength(2);
+    expect(loaded[0]).toEqual({ y: 2026, m: 4 });
+    expect(loaded[1]).toEqual({ y: 2026, m: 5 });
+  });
+});
+
+describe("realTransactionsOfMonth", () => {
+  const st = () => ({
+    expenses: [
+      { id: "e1", label: "Loyer", amount: 850, day: 3, cat: "logement", sub: "loyers-charges", freq: "mensuelle", incompressible: true,
+        history: [{ y: 2026, m: 6, day: 4, amount: 860 }] }, // occurrence réelle en juillet (m=6), montant décalé
+      { id: "e2", label: "Streaming", amount: 25, day: 15, cat: "loisirs", sub: "culture", freq: "mensuelle" }, // jamais payé en juillet
+    ],
+    incomes: [
+      { id: "i1", label: "Salaire", amount: 2500, mode: "salaire",
+        history: [{ y: 2026, m: 6, day: 28, amount: 2510 }] },
+    ],
+    extras: [{ y: 2026, m: 6, day: 20, amount: 60, cat: "loisirs", sub: "restaurants", label: "Resto" }],
+    taxonomie: TAXONOMIE,
+  });
+
+  it("mois chargé passé : uniquement le réel, occurrences à leur vraie date/montant", () => {
+    const tx = realTransactionsOfMonth(st(), 2026, 6);
+    // Loyer réel (860, le 4), salaire réel (2510, le 28), extra (60) — pas de Streaming, pas de planifiés
+    expect(tx).toHaveLength(3);
+    const loyer = tx.find((t) => t.label === "Loyer");
+    expect(loyer.amount).toBe(-860);
+    expect(loyer.day).toBe(4);
+    expect(loyer.real).toBe(true);
+    expect(tx.find((t) => t.label === "Streaming")).toBeUndefined();
+    expect(tx.find((t) => t.label === "Salaire").amount).toBe(2510);
+  });
+
+  it("mois sans today : aucune écriture planifiée sans occurrence n'est inventée", () => {
+    const tx = realTransactionsOfMonth(st(), 2026, 7); // août : rien de chargé
+    expect(tx).toHaveLength(0);
+  });
+
+  it("mois courant (today) : le réel + la prévision des planifiées sans occurrence", () => {
+    const tx = realTransactionsOfMonth(st(), 2026, 6, { today: 10 });
+    // Loyer réel (occurrence) + salaire réel + extra + Streaming en prévision
+    expect(tx).toHaveLength(4);
+    const streaming = tx.find((t) => t.label === "Streaming");
+    expect(streaming.amount).toBe(-25);
+    expect(streaming.real).toBe(false);
+  });
+});
+
+describe("realMonthSim — chaînage réel", () => {
+  const st = () => ({
+    expenses: [
+      { id: "e1", label: "Loyer", amount: 850, day: 3, cat: "logement", sub: "loyers-charges", freq: "mensuelle",
+        history: [{ y: 2026, m: 3, day: 3, amount: 800 }, { y: 2026, m: 4, day: 3, amount: 820 }] },
+    ],
+    incomes: [],
+    extras: [{ y: 2026, m: 4, day: 15, amount: 100, cat: "loisirs", sub: "restaurants", label: "Resto" }],
+    taxonomie: TAXONOMIE,
+  });
+
+  it("les soldes enchaînent le réel, pas les récurrentes re-planifiées", () => {
+    const avril = realMonthSim(st(), 2026, 3, 1000); // avril : −800
+    expect(avril.end).toBe(200);
+    expect(avril.start).toBe(1000);
+    expect(avril.totalOut).toBe(800);
+    const mai = realMonthSim(st(), 2026, 4, avril.end); // mai : −820 (loyer réel) − 100 (extra)
+    expect(mai.end).toBe(-720);
+    expect(mai.totalOut).toBe(920);
+  });
+
+  it("mois courant : realSoFar isole le cumul réel à ce jour", () => {
+    const mo = realMonthSim(st(), 2026, 4, 1000, { today: 10 });
+    // Le 10 : seul le loyer réel du 3 est survenu (−820) ; l'extra du 15 est à venir.
+    expect(mo.realSoFar).toBe(-820);
+    expect(mo.start + mo.realSoFar).toBe(180); // « solde actuel » exact
+    expect(mo.end).toBe(80); // fin de mois : réel + extra
+  });
+
+  it("un mois sans données réelles reste simulé par monthSim (hors chaînage réel)", () => {
+    const mo = monthSim(st(), 2026, 8, 500); // septembre : rien de chargé → loyer planifié −850
+    expect(mo.end).toBe(-350);
+  });
+});
