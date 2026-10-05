@@ -393,6 +393,33 @@ export function realMonthSim(state, y, m, opening, { today = null } = {}) {
 }
 
 /**
+ * Historique des flux d'épargne RÉELS sur les mois chargés : pour chaque mois
+ * (du plus ancien au plus récent), versements, retraits, flux net et cumul
+ * depuis le premier mois chargé — la trajectoire de la réserve telle que le
+ * relevé la montre. `cumul > 0` : la période a épargné ; `cumul < 0` : la
+ * réserve a été sollicitée.
+ *
+ * @returns {Array<{y:number,m:number,label:string,versements:number,retraits:number,net:number,cumul:number}>}
+ */
+export function savingsFlowHistory(state) {
+  const out = [];
+  let cumul = 0;
+  for (const d of loadedMonths(state)) {
+    let versements = 0;
+    let retraits = 0;
+    for (const t of realTransactionsOfMonth(state, d.y, d.m)) {
+      if (!t.transfer) continue;
+      if (t.amount < 0) versements += -t.amount;
+      else retraits += t.amount;
+    }
+    const net = versements - retraits;
+    cumul += net;
+    out.push({ y: d.y, m: d.m, label: monthLabel(d.y, d.m), versements, retraits, net, cumul });
+  }
+  return out;
+}
+
+/**
  * Mois « chargés » : ceux qui contiennent au moins une dépense
  * exceptionnelle ou un revenu unique (données typiquement importées d'un
  * relevé CSV). Liste triée du plus ancien au plus récent, sans doublon.

@@ -13,6 +13,7 @@ import {
   simulate,
   monthSim,
   loadedMonths,
+  savingsFlowHistory,
   hasRealData,
   realTransactionsOfMonth,
   realMonthSim,
@@ -1170,5 +1171,34 @@ describe("transferts internes ⇄", () => {
     expect(sim.fluxEpargne).toBe(-3000);
     expect(sim.totalIn).toBe(0); // pas de faux revenu
     expect(sim.end).toBe(3100);
+  });
+});
+
+describe("savingsFlowHistory — trajectoire cumulée de l'épargne", () => {
+  it("cumule les flux d'épargne réels des mois chargés, du plus ancien au plus récent", () => {
+    const st = {
+      expenses: [
+        { id: "e1", label: "Livret A", amount: 3000, day: 26, cat: "epargne", sub: "epargne-bancaire", freq: "mensuelle",
+          history: [{ y: 2026, m: 5, day: 26, amount: 3000 }] },
+      ],
+      incomes: [
+        { id: "i1", label: "Retrait", amount: 1500, mode: "unique", y: 2026, m: 4, day: 10,
+          cat: "epargne", sub: "epargne-bancaire" },
+        { id: "i2", label: "Retrait", amount: 1000, mode: "unique", y: 2026, m: 7, day: 10,
+          cat: "epargne", sub: "epargne-bancaire" },
+      ],
+      extras: [], taxonomie: defaultTaxonomie(),
+    };
+    const h = savingsFlowHistory(st);
+    expect(h).toHaveLength(3); // mai, juin, août
+    expect(h[0]).toEqual({ y: 2026, m: 4, label: "Mai 2026", versements: 0, retraits: 1500, net: -1500, cumul: -1500 });
+    expect(h[1].net).toBe(3000);
+    expect(h[1].cumul).toBe(1500);
+    expect(h[2].net).toBe(-1000);
+    expect(h[2].cumul).toBe(500);
+  });
+
+  it("aucun mois chargé → historique vide", () => {
+    expect(savingsFlowHistory({ expenses: [], incomes: [], extras: [] })).toEqual([]);
   });
 });

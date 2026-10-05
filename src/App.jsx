@@ -25,6 +25,7 @@ import {
   simulate,
   monthSim,
   loadedMonths,
+  savingsFlowHistory,
   hasRealData,
   realMonthSim,
   simStart,
@@ -265,6 +266,8 @@ export default function App() {
   // (simStart) ; l'historique enchaîne les mois jusqu'au mois courant,
   // dont le solde d'ouverture devient le solde résultant.
   const loadedList = useMemo(() => loadedMonths(state), [state]);
+  // Trajectoire de l'épargne sur les mois chargés : flux net par mois et cumul.
+  const savingsHist = useMemo(() => savingsFlowHistory(state), [state]);
   const anchor = useMemo(() => simStart(state, start.y, start.m), [state, start]);
 
   const hist = useMemo(() => {
@@ -655,7 +658,7 @@ export default function App() {
         {/* ------------------------------ APERÇU ------------------------------ */}
         {tab === "apercu" && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-7">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-8">
               <Kpi label="Solde en début de mois" value={fmt(sim.start)} />
               <Kpi label="Revenus du mois" value={"+ " + fmt(sim.totalIn)} tone="good" />
               <Kpi label="Dépenses du mois" value={"− " + fmt(sim.totalOut)} tone="bad" />
@@ -699,7 +702,55 @@ export default function App() {
                       : "Importez un relevé pour estimer vos habitudes"
                 }
               />
+              <Kpi
+                label="Tenue sans la réserve"
+                value={fmt(sim.end - prov.total - (sim.fluxEpargne ?? 0))}
+                tone={sim.end - prov.total - (sim.fluxEpargne ?? 0) >= 0 ? "good" : "bad"}
+                hint={
+                  "Solde de fin de mois probable hors flux d'épargne" +
+                  ((sim.fluxEpargne ?? 0) < 0
+                    ? " — le mois " + (sim.end - prov.total - sim.fluxEpargne < 0 ? "ne tient pas" : "tient") + " sans les " + fmt(sim.transferIn - sim.transferOut) + " de retraits"
+                    : (sim.fluxEpargne ?? 0) > 0
+                      ? " (épargne de " + fmt(sim.fluxEpargne) + " déjà mise de côté)"
+                      : " (aucun flux d'épargne ce mois-ci)")
+                }
+              />
             </div>
+
+            {savingsHist.length > 0 && (
+              <Card>
+                <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-semibold">Épargne — trajectoire sur les mois chargés</h2>
+                  {(() => {
+                    const last = savingsHist[savingsHist.length - 1];
+                    return (
+                      <span className={"text-xs font-semibold " + (last.cumul > 0 ? "text-emerald-600" : last.cumul < 0 ? "text-rose-600" : "text-slate-500")}>
+                        {savingsHist.length} mois chargé(s) · cumul {last.cumul > 0 ? "+ " + fmt(last.cumul) : last.cumul < 0 ? "− " + fmt(-last.cumul) : fmt(0)}
+                        {last.cumul < 0 ? " — la réserve a été sollicitée sur la période" : ""}
+                      </span>
+                    );
+                  })()}
+                </div>
+                <p className="mb-2 text-xs text-slate-500">
+                  Flux net vers l'épargne (versements − retraits) tel que le relevé le montre ; le cumul mesure le progrès vers un budget qui épargne sans piocher dans la réserve.
+                </p>
+                <div className="h-44">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={savingsHist.map((h) => ({ mois: MONTHS[h.m].slice(0, 3) + " " + String(h.y).slice(2), net: Math.round(h.net * 100) / 100 }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="mois" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => (Math.abs(v) >= 1000 ? (v / 1000) + "k" : String(v))} />
+                      <Tooltip formatter={(v) => [fmt(v) + " €", "Flux du mois"]} labelStyle={{ fontWeight: 600 }} />
+                      <Bar dataKey="net" radius={[3, 3, 0, 0]}>
+                        {savingsHist.map((h, i) => (
+                          <Cell key={i} fill={h.net > 0 ? "#10b981" : h.net < 0 ? "#f43f5e" : "#cbd5e1"} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </Card>
+            )}
 
             <Card>
               <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
