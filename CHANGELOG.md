@@ -5,6 +5,19 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.29.0] — 2026-10-10
+
+### Corrigé
+
+- **Import chevauchant : plus aucun double comptage.** Importer une extraction qui chevauche une précédente pouvait dupliquer des opérations : la banque re-catégorise a posteriori certaines opérations entre deux exports (le couple catégorie/sous-catégorie change, pas la date ni le libellé opération) ; la ligne ne matchait plus sa voie d'origine et était comptée une seconde fois (dépense exceptionnelle en double, occurrence fantôme rattachée à une écriture planifiée par montant seul, ou série dupliquée).
+- Nouveau **registre global des lignes déjà représentées** dans `rowsToEntries` : chaque ligne du relevé est comparée à TOUTES les lignes réelles de l'état (occurrences historisées des écritures planifiées, dépenses exceptionnelles, revenus uniques) par date + montant + libellé opération (repli sur date + montant pour les anciennes lignes) ; une ligne déjà comptée est ignorée, quelle que soit la voie. Un export chevauchant n'ajoute donc que ses lignes réellement nouvelles ; un réimport du même fichier n'ajoute rien.
+- `parseCsv` expose désormais le **libellé opération** (`opLabel`) de chaque ligne ; `mergeAddedLines` s'en sert comme identité stable (le couple peut changer entre exports), avec repli sur l'ancienne signature pour les lignes importées avant cette version.
+- **Fusion d'historique par multiset** (`mergeHistory`) : deux opérations légitimes identiques le même jour au même montant (ex. frais bancaires prélevés plusieurs fois) ne sont plus fusionnées en une seule occurrence ; le nombre d'occurrences conservé est le maximum des deux côtés, et un même relevé réimporté n'ajoute toujours rien.
+
+### Modifié
+
+- Au réimport d'un relevé déjà historisé, les occurrences déjà connues ne sont plus re-rattachées aux écritures planifiées (le registre les neutralise en amont) ; le résultat d'état est identique, la fusion étant idempotente.
+
 ## [Non publié]
 
 ### Idées / backlog

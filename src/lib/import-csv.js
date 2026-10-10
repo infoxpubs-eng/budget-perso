@@ -180,6 +180,10 @@ export function parseCsv(text, taxo = TAXONOMIE) {
       cat: cat ? cat.id : undefined,
       sub: sub ? sub.id : undefined,
       label: sub ? sub.label : catLabel,
+      // Libellé OPÉRATION bancaire (colonne « Libellé opération ») : stable
+      // d'un export à l'autre, contrairement au couple que la banque peut
+      // re-catégoriser a posteriori — c'est lui qui identifie l'opération.
+      opLabel: opLabel.trim(),
       catLabel,
       subLabel,
     });
@@ -205,20 +209,29 @@ export const A_CLASSER_LABEL = "À classer";
 
 /**
  * Fusionne les observations réelles d'une écriture récurrente (historique
- * du relevé : dates et montants observés). Dédupliquées par date et montant
- * (un même relevé réimporté n'ajoute rien), triées par date croissante.
+ * du relevé : dates et montants observés) DÉDOUBLONNÉES PAR MULTISET :
+ * pour chaque clé (date, montant), le nombre d'occurrences conservé est le
+ * maximum des deux côtés — un même relevé réimporté n'ajoute rien, mais
+ * deux opérations légitimes identiques le même jour (ex. frais bancaires
+ * prélevés plusieurs fois) ne sont PAS fusionnées en une seule.
  *
  * @param {Array<{day:number,m:number,y:number,amount:number}>} existing
  * @param {Array<{day:number,m:number,y:number,amount:number}>} obs
  */
 export function mergeHistory(existing = [], obs = []) {
+  const keyOf = (o) => o.y + "-" + o.m + "-" + o.day + "|" + Math.round(o.amount * 100);
+  const cnt = new Map();
+  for (const o of existing ?? []) cnt.set(keyOf(o), (cnt.get(keyOf(o)) ?? 0) + 1);
+  const cntObs = new Map();
+  for (const o of obs ?? []) cntObs.set(keyOf(o), (cntObs.get(keyOf(o)) ?? 0) + 1);
   const seen = new Set();
   const out = [];
   for (const o of [...(existing ?? []), ...(obs ?? [])]) {
-    const key = o.y + "-" + o.m + "-" + o.day + "|" + Math.round(o.amount * 100);
+    const key = keyOf(o);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ day: o.day, m: o.m, y: o.y, amount: o.amount });
+    const n = Math.max(cnt.get(key) ?? 0, cntObs.get(key) ?? 0);
+    for (let i = 0; i < n; i++) out.push({ day: o.day, m: o.m, y: o.y, amount: o.amount });
   }
   return out.sort((a, b) => (a.y - b.y) || (a.m - b.m) || (a.day - b.day));
 }
@@ -236,16 +249,29 @@ export function mergeHistory(existing = [], obs = []) {
  * @returns {Array} copie de `added` débarrassée des lignes déjà présentes
  */
 export function mergeAddedLines(existing = [], added = []) {
+  // Identité d'une ligne ajoutée. Avec libellé OPÉRATION (imports v0.29+) :
+  // date + montant + libellé opération — SANS le couple, que la banque peut
+  // re-catégoriser a posteriori entre deux exports. Sans libellé opération
+  // (anciennes lignes, avant stockage du champ) : repli sur l'ancienne
+  // signature complète, date + couple + montant + libellé du couple.
   const keyOf = (x) =>
-    [
-      x.day,
-      x.m,
-      x.y,
-      x.cat,
-      x.sub,
-      Math.round(Math.abs(x.amount ?? 0) * 100),
-      x.label,
-    ].join("|");
+    x.opLabel
+      ? [
+          x.day,
+          x.m,
+          x.y,
+          Math.round(Math.abs(x.amount ?? 0) * 100),
+          x.opLabel,
+        ].join("|")
+      : [
+          x.day,
+          x.m,
+          x.y,
+          x.cat,
+          x.sub,
+          Math.round(Math.abs(x.amount ?? 0) * 100),
+          x.label,
+        ].join("|");
   const counts = new Map();
   for (const x of existing ?? []) {
     const k = keyOf(x);
@@ -407,7 +433,51 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
   const recurringOut = new Map();
   const recurringIn = new Map();
 
+  // Registre global des lignes RÉELLES déjà représentées dans l'état —
+  // quelle que soit la voie : occurrence d'écriture planifiée, dépense
+  // exceptionnelle ou revenu unique. La banque peut re-catégoriser une
+  // opération entre deux exports (le couple change, le libellé opération
+  // et la date non) : sans ce registre, la ligne ne matche plus sa voie
+  // d'origine et serait comptée une seconde fois (extra en double,
+  // occurrence fantôme ou série dupliquée). Consulté en REPLI, après
+  // l'échec du rattachement à une écriture planifiée : une ligne déjà
+  // historisée mais toujours rattachable reste rattachée (fusion idempotente).
+  // Clé « étiquetée » (date + montant + libellé opération) quand il est
+  // connu ; repli « non étiquetée » (date + montant) pour les occurrences
+  // et les anciennes lignes importées avant le stockage du libellé.
+  const known = new Map(); // clé → multiplicité
+  const addKnown = (y, m, day, amount, opLabel) => {
+    const k = [y, m, day, Math.round(Math.abs(amount) * 100), opLabel ?? ""].join("|");
+    known.set(k, (known.get(k) ?? 0) + 1);
+  };
+  for (const e of expenses ?? [])
+    for (const h of e.history ?? []) addKnown(h.y, h.m, h.day ?? e.day, h.amount ?? e.amount, h.opLabel);
+  for (const i of incomesPlanned ?? []) {
+    for (const h of i.history ?? []) addKnown(h.y, h.m, h.day ?? i.day, h.amount ?? i.amount, h.opLabel);
+    if (i.mode === "unique") addKnown(i.y, i.m, i.day, i.amount, i.opLabel);
+  }
+  for (const x of planned.extras ?? []) addKnown(x.y, x.m, x.day, x.amount, x.opLabel);
+  const consumeKnown = (r) => {
+    const base = [r.y, r.m, r.day, Math.round(Math.abs(r.amount) * 100)];
+    for (const k of [base.concat(r.opLabel ?? "").join("|"), base.concat("").join("|")]) {
+      const n = known.get(k) ?? 0;
+      if (n > 0) {
+        known.set(k, n - 1);
+        return true;
+      }
+    }
+    return false;
+  };
+
   for (const r of resolved) {
+    // Ligne déjà représentée dans l'état (réimport, export chevauchant,
+    // re-catégorisation bancaire) : ignorée, elle est déjà comptée — en
+    // occurrence historisée d'une écriture planifiée, dépense
+    // exceptionnelle ou revenu unique. Consulté AVANT toute voie : même
+    // une occurrence à montant variable déjà historisée ne doit pas être
+    // re-rattachée (la fusion serait de toute façon idempotente) ni donner
+    // naissance à une série dupliquée.
+    if (consumeKnown(r)) continue;
     if (r.amount < 0) {
       if (subIsRecurring(r.cat, r.sub, taxo)) {
         const x = expenses.find((x) => matchesPlannedExpense(r, x));
@@ -440,6 +510,7 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
         m: r.m,
         cat: r.cat,
         sub: r.sub,
+        opLabel: r.opLabel,
       });
       depensesTotal += -r.amount;
     } else {
@@ -475,6 +546,7 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
         m: r.m,
         cat: r.cat,
         sub: r.sub,
+        opLabel: r.opLabel,
       });
       revenusTotal += r.amount;
     }

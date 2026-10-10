@@ -824,12 +824,14 @@ describe("réimport d'une série 🔁 à montant variable", () => {
     expect(entry.amount).toBe(900);
     expect(entry.history).toHaveLength(3);
 
-    // Réimport du même relevé, l'écriture existe maintenant avec son historique.
+    // Réimport du même relevé : l'écriture existe avec son historique, les
+    // occurrences déjà historisées sont neutralisées par le registre global
+    // (v0.29) — aucune écriture en double, aucun extra, l'historique existant
+    // suffit (la fusion serait idempotente).
     const second = rowsToEntries(rows, { expenses: [entry] });
-    expect(second.newExpenses).toHaveLength(0); // rattachée, pas dupliquée
-    expect(second.coveredHistory).toHaveLength(1);
-    expect(second.coveredHistory[0].id).toBe(entry.id);
-    expect(second.coveredHistory[0].obs).toHaveLength(3);
+    expect(second.newExpenses).toHaveLength(0); // pas d'écriture en double
+    expect(second.coveredHistory).toHaveLength(0); // occurrences déjà connues : pas de re-rattachement
+    expect(second.extras).toHaveLength(0);
   });
 
   it("un mois nouveau au montant inconnu reste rattaché avec synchronisation", () => {
@@ -892,5 +894,95 @@ describe("import CSV — virements d'épargne ⇄", () => {
     expect(EPARGNE_LABEL_RE.test("LIVRET A")).toBe(true);
     expect(EPARGNE_LABEL_RE.test("RESTO CHEZ PAUL")).toBe(false);
     expect(EPARGNE_LABEL_RE.test("COURS DE NATATION PISCINE")).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Imports chevauchants, re-catégorisation bancaire, idempotence (v0.29) */
+/* ------------------------------------------------------------------ */
+
+describe("import CSV — registre global des lignes déjà représentées", () => {
+  const head = "Date transaction;Date comptabilisation;Libellé opération;Catégorie;Sous-Catégorie;Montant;Pointée;\n";
+
+  const rowsOf = (csv) => parseCsv(csv, TAXONOMIE).rows;
+
+  it("deux opérations légitimes identiques le même jour ne sont pas fusionnées (multiset)", () => {
+    const h1 = mergeHistory([], [{ day: 5, m: 9, y: 2026, amount: -1.35 }]);
+    const h2 = mergeHistory(h1, [
+      { day: 5, m: 9, y: 2026, amount: -1.35 },
+      { day: 5, m: 9, y: 2026, amount: -1.35 },
+    ]);
+    expect(h2).toHaveLength(2);
+    // Réimport du même relevé : toujours 2, pas plus.
+    const h3 = mergeHistory(h2, [{ day: 5, m: 9, y: 2026, amount: -1.35 }]);
+    expect(h3).toHaveLength(2);
+  });
+
+  it("mergeHistory : une seule occurrence reste unique, deux côtés ne doublonnent pas", () => {
+    const h = mergeHistory(
+      [{ day: 1, m: 3, y: 2026, amount: -12 }, { day: 2, m: 3, y: 2026, amount: -8 }],
+      [{ day: 1, m: 3, y: 2026, amount: -12 }, { day: 2, m: 3, y: 2026, amount: -8 }, { day: 3, m: 3, y: 2026, amount: -5 }],
+    );
+    expect(h).toHaveLength(3);
+    expect(h[2].day).toBe(3);
+  });
+
+  it("mergeAddedLines : couple re-catégorisé par la banque, même libellé opération → PAS de doublon", () => {
+    const existing = [{ day: 15, m: 6, y: 2026, amount: -120, cat: "loisirs", sub: "restaurants", label: "Restaurants, bars…", opLabel: "CB RESTO PAUL" }];
+    const added = [{ day: 15, m: 6, y: 2026, amount: -120, cat: "voyages", sub: "hebergement", label: "Voyages/Hébergement", opLabel: "CB RESTO PAUL" }];
+    expect(mergeAddedLines(existing, added)).toHaveLength(0);
+  });
+
+  it("mergeAddedLines : sans libellé opération, repli sur l'ancienne signature (couple inclus)", () => {
+    const existing = [{ day: 15, m: 6, y: 2026, amount: -120, cat: "loisirs", sub: "restaurants", label: "Restaurants, bars…" }];
+    const added = [{ day: 15, m: 6, y: 2026, amount: -120, cat: "loisirs", sub: "restaurants", label: "Restaurants, bars…" }];
+    expect(mergeAddedLines(existing, added)).toHaveLength(0);
+    const other = [{ day: 15, m: 6, y: 2026, amount: -120, cat: "voyages", sub: "hebergement", label: "Voyages/Hébergement" }];
+    expect(mergeAddedLines(existing, other)).toHaveLength(1);
+  });
+
+  it("rowsToEntries : occurrence déjà dans l'historique d'une écriture planifiée n'est PAS re-comptée", () => {
+    // Relevé : frais bancaires (couple 🔁🔒), déjà couverts par l'écriture
+    // planifiée existante (history). Rien ne doit être ajouté, même si la
+    // banque a changé le couple de la ligne entre les deux exports.
+    const frais = { id: "e1", label: "Frais bancaires et de gestion (dont agios)", cat: "services-financiers", sub: "frais-bancaires", day: 5, amount: -1.35, freq: "mensuelle", history: [{ day: 5, m: 7, y: 2026, amount: -1.35 }] };
+    const csv = head +
+      "05/09/2026;05/09/2026;PRELEVEMENT FRAIS;Services financiers / professionnels;Frais bancaires et de gestion (dont agios);-1,35;Oui;\n" +
+      "06/09/2026;06/09/2026;CB RESTO PAUL;Voyages;Voyages/Hébergement;-25,00;Oui;\n";
+    const r = rowsToEntries(rowsOf(csv), { expenses: [frais], incomes: [], extras: [] }, TAXONOMIE);
+    // Le frais du 05/09 est une occurrence de l'écriture existante (rattachée,
+    // pas un extra) ; le resto est une dépense exceptionnelle nouvelle.
+    const extraFrais = r.extras.find((x) => x.day === 5);
+    expect(extraFrais).toBeUndefined();
+    expect(r.extras.filter((x) => x.day === 6)).toHaveLength(1);
+    // L'occurrence est bien enregistrée dans l'historique de l'écriture.
+    const cov = r.coveredHistory.find((c) => c.id === "e1");
+    expect(cov.obs).toHaveLength(1);
+    expect(cov.obs[0].day).toBe(5);
+  });
+
+  it("rowsToEntries : ligne identique à une dépense exceptionnelle existante (avec libellé opération) est ignorée", () => {
+    const state = { expenses: [], incomes: [], extras: [{ id: "x1", day: 3, m: 3, y: 2026, amount: -12.39, cat: "sante", sub: "pharmacie", label: "Pharmacie et laboratoire", opLabel: "PHARMACIE CENTRALE" }] };
+    const csv = head + "03/04/2026;03/04/2026;PHARMACIE CENTRALE;Santé;Pharmacie et laboratoire;-12,39;Oui;\n";
+    const r = rowsToEntries(rowsOf(csv), state, TAXONOMIE);
+    expect(r.extras).toHaveLength(0);
+  });
+
+  it("rowsToEntries : deux occurrences identiques le même jour dans l'état → réimport des 2 lignes entièrement ignoré, la 3e ajoutée", () => {
+    const state = {
+      expenses: [],
+      incomes: [],
+      extras: [
+        { id: "x1", day: 5, m: 8, y: 2026, amount: -12.39, cat: "sante", sub: "pharmacie", label: "Pharmacie et laboratoire", opLabel: "PHARMACIE CENTRALE" },
+        { id: "x2", day: 5, m: 8, y: 2026, amount: -12.39, cat: "sante", sub: "pharmacie", label: "Pharmacie et laboratoire", opLabel: "PHARMACIE CENTRALE" },
+      ],
+    };
+    const csv = head +
+      "05/09/2026;05/09/2026;PHARMACIE CENTRALE;Santé;Pharmacie et laboratoire;-12,39;Oui;\n" +
+      "05/09/2026;05/09/2026;PHARMACIE CENTRALE;Santé;Pharmacie et laboratoire;-12,39;Oui;\n" +
+      "05/09/2026;05/09/2026;PHARMACIE CENTRALE;Santé;Pharmacie et laboratoire;-12,39;Oui;\n";
+    const r = rowsToEntries(rowsOf(csv), state, TAXONOMIE);
+    // 2 déjà représentées, la 3e est nouvelle.
+    expect(r.extras).toHaveLength(1);
   });
 });
