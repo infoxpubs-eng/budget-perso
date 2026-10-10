@@ -982,7 +982,24 @@ describe("import CSV — registre global des lignes déjà représentées", () =
       "05/09/2026;05/09/2026;PHARMACIE CENTRALE;Santé;Pharmacie et laboratoire;-12,39;Oui;\n" +
       "05/09/2026;05/09/2026;PHARMACIE CENTRALE;Santé;Pharmacie et laboratoire;-12,39;Oui;\n";
     const r = rowsToEntries(rowsOf(csv), state, TAXONOMIE);
-    // 2 déjà représentées, la 3e est nouvelle.
-    expect(r.extras).toHaveLength(1);
+    // Les 3 lignes sont neutralisées : 2 tickets étiquetés + 2 tickets non
+    // étiquetés (trade-off assumé depuis v0.29.1 — le repli date+montant
+    // reconnaît les opérations re-libellées par la banque, au prix de
+    // l'absorption d'une opération nouvelle identique date+montant).
+    expect(r.extras).toHaveLength(0);
+  });
+
+  it("rowsToEntries : opération re-libellée par la banque (libellé reformulé, même date+montant) → PAS de doublon", () => {
+    // Export 1 : « PRELEVEMENT EUROPEEN DE: SOGESSUR » ; export 2 (format
+    // « Libellé complet ») : « PRELEVEMENT EUROPEEN 0227782496 DE: SOGESSUR
+    // ID: FR13ZZZ428225 MOTIF: … ». Même opération, libellé différent.
+    const state = {
+      expenses: [],
+      incomes: [],
+      extras: [{ id: "x1", day: 5, m: 8, y: 2026, amount: -69.21, cat: "logement", sub: "assurance-habitation", label: "Assurance habitation et RC", opLabel: "PRELEVEMENT EUROPEEN DE: SOGESSUR" }],
+    };
+    const csv = head + "05/09/2026;05/09/2026;PRELEVEMENT EUROPEEN 0227782496 DE: SOGESSUR ID: FR13ZZZ428225 MOTIF: SOGESSUR/000000004774884191523500;Logement;Assurance habitation et RC;-69,21;Oui;\n";
+    const r = rowsToEntries(rowsOf(csv), state, TAXONOMIE);
+    expect(r.extras).toHaveLength(0);
   });
 });

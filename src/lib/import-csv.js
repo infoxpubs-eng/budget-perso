@@ -446,9 +446,21 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
   // connu ; repli « non étiquetée » (date + montant) pour les occurrences
   // et les anciennes lignes importées avant le stockage du libellé.
   const known = new Map(); // clé → multiplicité
+  // Chaque ligne connue fournit DEUX tickets : la clé étiquetée (date +
+  // montant + libellé) et la clé non étiquetée (date + montant). La banque
+  // peut reformuler le libellé d'une même opération d'un export à l'autre
+  // (export « Libellé opération » vs « Libellé complet », ajout d'IDs de
+  // mandat…) : la clé étiquetée ne matche alors plus, et le ticket non
+  // étiqueté reconnaît la ligne malgré tout.
+  const keyKnown = (y, m, day, amount, opLabel) =>
+    [y, m, day, Math.round(Math.abs(amount) * 100), opLabel ?? ""].join("|");
   const addKnown = (y, m, day, amount, opLabel) => {
-    const k = [y, m, day, Math.round(Math.abs(amount) * 100), opLabel ?? ""].join("|");
+    const k = keyKnown(y, m, day, amount, opLabel);
     known.set(k, (known.get(k) ?? 0) + 1);
+    if (opLabel) {
+      const ku = keyKnown(y, m, day, amount, "");
+      known.set(ku, (known.get(ku) ?? 0) + 1);
+    }
   };
   for (const e of expenses ?? [])
     for (const h of e.history ?? []) addKnown(h.y, h.m, h.day ?? e.day, h.amount ?? e.amount, h.opLabel);

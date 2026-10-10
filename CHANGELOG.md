@@ -5,6 +5,14 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.29.1] — 2026-10-10
+
+### Corrigé
+
+- **Opérations re-libellées entre exports : plus de double comptage.** La banque reformule le libellé d'une même opération d'un export à l'autre (colonne « Libellé opération » vs « Libellé complet », ajout d'identifiants de mandat, motifs plus verbeux). La clé du registre global (date + montant + libellé) ne matchait alors plus et l'opération était comptée deux fois.
+- Le registre enregistre désormais **deux tickets par ligne connue** : la clé étiquetée (date + montant + libellé) et une clé non étiquetée (date + montant) ; à l'import, la clé étiquetée est essayée d'abord, puis la clé non étiquetée. Une opération re-libellée est donc reconnue malgré tout.
+- Trade-off documenté : une opération réellement nouvelle, identique en date et montant à des lignes déjà représentées, peut être absorbée à tort ; les tests reflètent ce comportement.
+
 ## [0.29.0] — 2026-10-10
 
 ### Corrigé
