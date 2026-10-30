@@ -710,16 +710,13 @@ export default function App() {
                 }
               />
               <Kpi
-                label="Tenue sans la réserve"
-                value={fmt(sim.end - prov.total - (sim.fluxEpargne ?? 0))}
-                tone={sim.end - prov.total - (sim.fluxEpargne ?? 0) >= 0 ? "good" : "bad"}
+                label="Reste à dépenser"
+                value={fmt(Math.max(0, sim.end - prov.total))}
+                tone={sim.end - prov.total > 0 ? "good" : "bad"}
                 hint={
-                  "Solde de fin de mois probable hors flux d'épargne" +
-                  ((sim.fluxEpargne ?? 0) < 0
-                    ? " — le mois " + (sim.end - prov.total - sim.fluxEpargne < 0 ? "ne tient pas" : "tient") + " sans les " + fmt(sim.transferIn - sim.transferOut) + " de retraits"
-                    : (sim.fluxEpargne ?? 0) > 0
-                      ? " (épargne de " + fmt(sim.fluxEpargne) + " déjà mise de côté)"
-                      : " (aucun flux d'épargne ce mois-ci)")
+                  sim.end - prov.total >= 0
+                    ? "Sans finir à découvert en fin de mois — échéances planifiées et habitudes (prorata des jours restants) décomptées"
+                    : "Budget épuisé — découvert probable de " + fmt(Math.abs(sim.end - prov.total)) + " €"
                 }
               />
             </div>

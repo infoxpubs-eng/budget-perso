@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.7] — 2026-10-30
+
+### Modifié
+
+- **KPI « Reste à dépenser »** remplace « Tenue sans la réserve » dans l'Aperçu : montant résiduel dépensable sans finir à découvert en fin de mois — toutes les échéances planifiées et la provision d'habitudes (au prorata des jours restants) décomptées. Borné à 0 : si le solde probable est négatif, la carte affiche le découvert probable. Les versements d'épargne sortis ne sont pas dépensables (déjà déduits du solde simulé), les retraits de la réserve le sont.
+
 ## [0.30.6] — 2026-10-30
 
 ### Corrigé
