@@ -5,6 +5,13 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.5] — 2026-10-30
+
+### Modifié
+
+- **L'alimentation n'est plus planifiée en séries** : des courses au même prix plusieurs mois de suite sont des habitudes d'achat, pas des mensualités. À l'import comme en migration, les séries 🔁 « Alimentation » (même confirmées sur ≥ 2 mois) deviennent des dépenses datées ; la moyenne par jour reste portée par le modèle d'habitudes. Les autres couples récurrents — transports quotidiens (métro, Vélib…), téléphonie, frais bancaires, emprunts — restent planifiés. Une écriture alimentaire créée à la main (sans historique réel) est conservée.
+- **Migration v6** : conversion automatique des séries alimentaire planifiées en extras datés, occurrence par occurrence — mêmes dates, mêmes montants, aucun solde ne change.
+
 ## [0.30.4] — 2026-10-30
 
 ### Modifié

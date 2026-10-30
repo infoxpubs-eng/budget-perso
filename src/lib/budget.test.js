@@ -1144,7 +1144,7 @@ describe("transferts internes ⇄", () => {
     expect(t.subTransfer("epargne", "epargne-bancaire", t.TAXONOMIE)).toBe(true);
     expect(t.subTransfer("revenus-epargne", "autres", t.TAXONOMIE)).toBe(true);
     expect(t.subTransfer("loisirs", "restaurants", t.TAXONOMIE)).toBe(false);
-    expect(t.TAXO_FLAGS_VERSION).toBe(5);
+    expect(t.TAXO_FLAGS_VERSION).toBe(6);
   });
 
   it("migrateState re-applique les marqueurs ⇄ sur un ancien état", () => {
@@ -1152,14 +1152,14 @@ describe("transferts internes ⇄", () => {
     const cat = (st.taxonomie ?? []).find((c) => c.id === "epargne");
     const sub = cat?.subs.find((x) => x.id === "epargne-bancaire");
     expect(!!sub?.transfer).toBe(true);
-    expect(st.taxoFlagsVersion).toBe(5);
+    expect(st.taxoFlagsVersion).toBe(6);
   });
 
   it("migrateState re-applique le marqueur one-shot de la nomenclature sur un ancien état", () => {
     const st = migrateState({ soldeDepart: 0, expenses: [], incomes: [], extras: [], taxoFlagsVersion: 2 });
     const sub = (st.taxonomie ?? []).find((c) => c.id === "logement")?.subs.find((x) => x.id === "frais-exceptionnels");
     expect(!!sub?.oneShot).toBe(true);
-    expect(st.taxoFlagsVersion).toBe(5);
+    expect(st.taxoFlagsVersion).toBe(6);
   });
 
   it("v4 : l'épargne bancaire n'est plus récurrente et les séries planifiées deviennent des extras datés", () => {
@@ -1266,6 +1266,64 @@ describe("transferts internes ⇄", () => {
     expect(st.expenses).toHaveLength(1);
     expect(st.expenses[0].label).toBe("Crédit conso");
     expect(st.extras).toHaveLength(0);
+  });
+
+  it("v6 : les séries alimentation confirmées sur ≥ 2 mois redeviennent des extras datés, les autres couples restent planifiés", () => {
+    const st = migrateState({
+      soldeDepart: 0,
+      expenses: [
+        {
+          id: "a1",
+          label: "Alimentation · 22,06 €",
+          amount: 22.06,
+          day: 12,
+          cat: "vie-quotidienne",
+          sub: "alimentation",
+          freq: "mensuelle",
+          history: [
+            { y: 2026, m: 5, day: 12, amount: 22.06 },
+            { y: 2026, m: 7, day: 14, amount: 22.06 },
+            { y: 2026, m: 8, day: 11, amount: 22.06 },
+          ],
+        },
+        {
+          id: "t1",
+          label: "Transports quotidiens (métro, bus…) · 1,70 €",
+          amount: 1.7,
+          day: 6,
+          cat: "voyages-transports",
+          sub: "quotidiens",
+          freq: "mensuelle",
+          history: [
+            { y: 2026, m: 5, day: 6, amount: 1.7 },
+            { y: 2026, m: 7, day: 9, amount: 1.7 },
+          ],
+        },
+        {
+          id: "m1",
+          label: "Courses",
+          amount: 200,
+          day: 15,
+          cat: "vie-quotidienne",
+          sub: "alimentation",
+          freq: "mensuelle",
+        },
+      ],
+      incomes: [],
+      extras: [],
+      taxoFlagsVersion: 5,
+    });
+    // Les séries alimentation issues de l'import disparaissent…
+    expect(st.expenses.map((e) => e.id)).toEqual(["t1", "m1"]);
+    // …remplacées par leurs occurrences réelles, à l'identique
+    const conv = st.extras.filter((x) => x.id.startsWith("a1-occ-"));
+    expect(conv).toHaveLength(3);
+    expect(conv[0]).toEqual({ id: "a1-occ-2026-5-12", label: "Alimentation · 22,06 €", amount: 22.06, day: 12, y: 2026, m: 5, cat: "vie-quotidienne", sub: "alimentation" });
+    expect(conv[2].day).toBe(11);
+    // Les transports quotidiens (métro, Vélib…) restent une série planifiée
+    expect(st.expenses[0].history).toHaveLength(2);
+    // Une écriture alimentaire créée à la main (sans historique) est conservée
+    expect(st.expenses[1].label).toBe("Courses");
   });
 
   it("totaux budgétaires hors transferts, flux d'épargne exposé, solde exact", () => {

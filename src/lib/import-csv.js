@@ -204,6 +204,13 @@ function newId() {
 
 /** Identifiant de la catégorie d'accueil des couples absents de la nomenclature. */
 export const A_CLASSER = "a-classer";
+
+// Sous-catégories dont les lignes 🔁 ne donnent JAMAIS de série planifiée :
+// les occurrences deviennent des dépenses datées (extras), et c'est le
+// modèle d'habitudes qui en tire la moyenne par jour. « Alimentation » :
+// des courses au même prix plusieurs mois de suite sont des habitudes
+// d'achat, pas des mensualités figées (v6).
+export const NO_SERIES_SUBS = new Set(["alimentation"]);
 /** Libellé de la catégorie d'accueil des couples absents de la nomenclature. */
 export const A_CLASSER_LABEL = "À classer";
 
@@ -610,13 +617,14 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
           continue;
         }
         // Une série n'est planifiée que si elle est confirmée sur au moins
-        // DEUX mois distincts (même montant, une fois par mois). Une
-        // occurrence isolée — typiquement une dépense alimentaire ou de
-        // transport dont le montant revient par coïncidence — n'est pas une
-        // habitude mensuelle : la ligne reste réelle et datée (dépense non
-        // planifiée ou revenu unique), et c'est le modèle d'habitudes qui
-        // en tire la moyenne par jour.
-        if (months.size < 2) {
+        // DEUX mois distincts (même montant, une fois par mois), et si le
+        // couple ne porte pas de série interdite de planification :
+        // « Alimentation » est traitée en habitudes (extras datés + moyenne
+        // par jour du modèle), jamais en mensualités figées. Une occurrence
+        // isolée — typiquement une dépense dont le montant revient par
+        // coïncidence — n'est pas non plus une habitude mensuelle : la ligne
+        // reste réelle et datée (dépense non planifiée ou revenu unique).
+        if (months.size < 2 || (kind === "depense" && NO_SERIES_SUBS.has(sub))) {
           for (const r of sorted) {
             if (kind === "depense") {
               extras.push({

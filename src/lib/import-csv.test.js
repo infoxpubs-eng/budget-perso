@@ -640,13 +640,22 @@ describe("séries temporelles des couples 🔁 (v0.20.0)", () => {
     expect(r.extras).toHaveLength(2);
     expect(r.extras[0].amount).toBeCloseTo(17.53);
     expect(r.extras[1].day).toBe(18);
-    // Le même montant sur DEUX mois distincts : série confirmée, planifiée
+    // Le même montant sur DEUX mois distincts : série confirmée, planifiée…
     const r2 = rowsToEntries([
       row({ day: 4, m: 6, amount: -17.53, cat: "vie-quotidienne", sub: "alimentation", label: "Alimentation" }),
       row({ day: 5, m: 7, amount: -17.53, cat: "vie-quotidienne", sub: "alimentation", label: "Alimentation" }),
     ]);
-    expect(r2.newExpenses).toHaveLength(1);
-    expect(r2.newExpenses[0].history).toHaveLength(2);
+    // …sauf pour « Alimentation » (v6) : habitudes d'achat, jamais des mensualités
+    expect(r2.newExpenses).toHaveLength(0);
+    expect(r2.extras).toHaveLength(2);
+    expect(r2.extras.map((x) => x.m)).toEqual([6, 7]);
+    // Les transports quotidiens, eux, restent une série planifiée
+    const r3 = rowsToEntries([
+      row({ day: 4, m: 6, amount: -1.7, cat: "voyages-transports", sub: "quotidiens", label: "Transports quotidiens (métro, bus…)" }),
+      row({ day: 5, m: 7, amount: -1.7, cat: "voyages-transports", sub: "quotidiens", label: "Transports quotidiens (métro, bus…)" }),
+    ]);
+    expect(r3.newExpenses).toHaveLength(1);
+    expect(r3.newExpenses[0].history).toHaveLength(2);
   });
 
   it("un prélèvement 🔁 dont le montant varie : une seule écriture, au dernier montant observé", () => {
@@ -708,12 +717,12 @@ describe("séries temporelles des couples 🔁 (v0.20.0)", () => {
   });
 
   it("couple ambigu (plusieurs écritures planifiées, aucune rapprochée) : nouvelle écriture", () => {
-    const a = { id: "a", label: "A", amount: 220, day: 5, cat: "vie-quotidienne", sub: "alimentation", freq: "mensuelle" };
-    const b = { id: "b", label: "B", amount: 220, day: 20, cat: "vie-quotidienne", sub: "alimentation", freq: "mensuelle" };
+    const a = { id: "a", label: "A", amount: 220, day: 5, cat: "voyages-transports", sub: "quotidiens", freq: "mensuelle" };
+    const b = { id: "b", label: "B", amount: 220, day: 20, cat: "voyages-transports", sub: "quotidiens", freq: "mensuelle" };
     const r = rowsToEntries(
       [
-        row({ amount: -250, cat: "vie-quotidienne", sub: "alimentation", label: "Courses" }),
-        row({ amount: -250, cat: "vie-quotidienne", sub: "alimentation", label: "Courses", m: 9 }),
+        row({ amount: -250, cat: "voyages-transports", sub: "quotidiens", label: "Transports quotidiens (métro, bus…)" }),
+        row({ amount: -250, cat: "voyages-transports", sub: "quotidiens", label: "Transports quotidiens (métro, bus…)", m: 9 }),
       ],
       { expenses: [a, b] }
     );

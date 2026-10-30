@@ -255,6 +255,36 @@ export function migrateState(raw) {
       });
       if (coincidental.length) s.extras = [...(s.extras ?? []), ...coincidental];
     }
+    // v6 : « Alimentation » n'est plus planifiée en séries mensuelles. Les
+    // courses au même prix qui reviennent plusieurs mois de suite sont des
+    // habitudes d'achat, pas des mensualités : même confirmées sur ≥ 2 mois,
+    // elles redeviennent des dépenses non planifiées datées, occurrence par
+    // occurrence (mêmes dates, mêmes montants : aucun solde ne change) — la
+    // moyenne par jour est portée par le modèle d'habitudes. Une écriture
+    // ALIMENTAIRE créée à la main (sans historique réel) est conservée :
+    // c'est un choix explicite de l'utilisateur. Les autres couples
+    // récurrents (transports quotidiens 🔁, téléphonie, frais bancaires,
+    // emprunts…) restent planifiés.
+    if ((raw?.taxoFlagsVersion ?? 0) < 6) {
+      const panier = [];
+      s.expenses = (s.expenses ?? []).filter((e) => {
+        if (e.sub !== "alimentation" || !e.history?.length) return true;
+        for (const h of e.history) {
+          panier.push({
+            id: `${e.id}-occ-${h.y}-${h.m}-${h.day}`,
+            label: e.label,
+            amount: Math.abs(h.amount ?? e.amount),
+            day: h.day,
+            y: h.y,
+            m: h.m,
+            cat: e.cat,
+            sub: e.sub,
+          });
+        }
+        return false;
+      });
+      if (panier.length) s.extras = [...(s.extras ?? []), ...panier];
+    }
     s.taxoFlagsVersion = TAXO_FLAGS_VERSION;
   }
   // Réglages du modèle prédictif (fenêtre, seuil de présence, statistique) :
