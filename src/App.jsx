@@ -1308,7 +1308,6 @@ export default function App() {
                 <p className="mb-3 text-xs text-slate-500">
                   Pour chaque mois simulé : débits et crédits récurrents uniquement, puis point bas de la trajectoire (suivant ces dates stables) et solde en fin de mois.
                 </p>
-                </p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
                     <thead>

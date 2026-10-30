@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -28,25 +28,12 @@ jobs:
         run: npm install
 
       - name: Build
-        run: |
-          set +e
-          npm run build > build-debug.log 2>&1
-          code=$?
-          cat build-debug.log
-          if [ $code -ne 0 ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add build-debug.log
-            git commit -m "debug: log de build en echec"
-            git push origin HEAD:refs/heads/build-debug || true
-          fi
-          exit $code
+        run: npm run build
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
+        path: dist
 
   deploy:
     needs: build
