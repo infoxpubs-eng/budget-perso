@@ -609,6 +609,47 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
           }
           continue;
         }
+        // Une série n'est planifiée que si elle est confirmée sur au moins
+        // DEUX mois distincts (même montant, une fois par mois). Une
+        // occurrence isolée — typiquement une dépense alimentaire ou de
+        // transport dont le montant revient par coïncidence — n'est pas une
+        // habitude mensuelle : la ligne reste réelle et datée (dépense non
+        // planifiée ou revenu unique), et c'est le modèle d'habitudes qui
+        // en tire la moyenne par jour.
+        if (months.size < 2) {
+          for (const r of sorted) {
+            if (kind === "depense") {
+              extras.push({
+                id: newId(),
+                label: r.label,
+                amount: -r.amount,
+                day: r.day,
+                y: r.y,
+                m: r.m,
+                cat: r.cat,
+                sub: r.sub,
+                opLabel: r.opLabel,
+                oneShot: subOneShot(r.cat, r.sub, taxo) || undefined,
+              });
+              depensesTotal += -r.amount;
+            } else {
+              incomes.push({
+                id: newId(),
+                label: r.label,
+                amount: r.amount,
+                mode: "unique",
+                day: r.day,
+                y: r.y,
+                m: r.m,
+                cat: r.cat,
+                sub: r.sub,
+                opLabel: r.opLabel,
+              });
+              revenusTotal += r.amount;
+            }
+          }
+          continue;
+        }
         const amount = kind === "depense" ? -last.amount : last.amount;
         const label =
           seriesList.length > 1

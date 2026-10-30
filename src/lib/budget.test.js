@@ -1144,7 +1144,7 @@ describe("transferts internes ⇄", () => {
     expect(t.subTransfer("epargne", "epargne-bancaire", t.TAXONOMIE)).toBe(true);
     expect(t.subTransfer("revenus-epargne", "autres", t.TAXONOMIE)).toBe(true);
     expect(t.subTransfer("loisirs", "restaurants", t.TAXONOMIE)).toBe(false);
-    expect(t.TAXO_FLAGS_VERSION).toBe(4);
+    expect(t.TAXO_FLAGS_VERSION).toBe(5);
   });
 
   it("migrateState re-applique les marqueurs ⇄ sur un ancien état", () => {
@@ -1152,14 +1152,14 @@ describe("transferts internes ⇄", () => {
     const cat = (st.taxonomie ?? []).find((c) => c.id === "epargne");
     const sub = cat?.subs.find((x) => x.id === "epargne-bancaire");
     expect(!!sub?.transfer).toBe(true);
-    expect(st.taxoFlagsVersion).toBe(4);
+    expect(st.taxoFlagsVersion).toBe(5);
   });
 
   it("migrateState re-applique le marqueur one-shot de la nomenclature sur un ancien état", () => {
     const st = migrateState({ soldeDepart: 0, expenses: [], incomes: [], extras: [], taxoFlagsVersion: 2 });
     const sub = (st.taxonomie ?? []).find((c) => c.id === "logement")?.subs.find((x) => x.id === "frais-exceptionnels");
     expect(!!sub?.oneShot).toBe(true);
-    expect(st.taxoFlagsVersion).toBe(4);
+    expect(st.taxoFlagsVersion).toBe(5);
   });
 
   it("v4 : l'épargne bancaire n'est plus récurrente et les séries planifiées deviennent des extras datés", () => {
@@ -1201,6 +1201,71 @@ describe("transferts internes ⇄", () => {
     expect(sim.totalOut).toBe(0);
     expect(sim.transferOut).toBe(2200);
     expect(sim.fluxEpargne).toBe(2200);
+  });
+
+  it("v5 : une série planifiée observée sur un seul mois (coïncidence) redevient une dépense datée", () => {
+    const st = migrateState({
+      soldeDepart: 0,
+      expenses: [
+        {
+          id: "p1",
+          label: "Alimentation · 17,53 €",
+          amount: 17.53,
+          day: 4,
+          cat: "vie-quotidienne",
+          sub: "alimentation",
+          freq: "mensuelle",
+          history: [{ y: 2026, m: 6, day: 4, amount: 17.53 }],
+        },
+        {
+          id: "p2",
+          label: "Crédit conso",
+          amount: 199.4,
+          day: 30,
+          cat: "emprunts-conso",
+          sub: "credit-conso",
+          freq: "mensuelle",
+          history: [
+            { y: 2026, m: 6, day: 30, amount: 199.4 },
+            { y: 2026, m: 7, day: 30, amount: 199.4 },
+          ],
+        },
+      ],
+      incomes: [],
+      extras: [],
+      taxoFlagsVersion: 4,
+    });
+    // La coïncidence unimensuelle disparaît des planifiées…
+    expect(st.expenses.map((e) => e.id)).toEqual(["p2"]);
+    // …et son occurrence réelle est conservée en dépense non planifiée datée
+    const conv = st.extras.find((x) => x.id === "p1-occ-2026-6-4");
+    expect(conv).toEqual({ id: "p1-occ-2026-6-4", label: "Alimentation · 17,53 €", amount: 17.53, day: 4, y: 2026, m: 6, cat: "vie-quotidienne", sub: "alimentation" });
+    // La série confirmée sur deux mois reste planifiée, intacte
+    expect(st.expenses[0].history).toHaveLength(2);
+  });
+
+  it("v5 : une série unique d'un couple (engagement réel, ex. Crédit conso) n'est pas balayée", () => {
+    const st = migrateState({
+      soldeDepart: 0,
+      expenses: [
+        {
+          id: "cc",
+          label: "Crédit conso",
+          amount: 199.4,
+          day: 30,
+          cat: "emprunts-conso",
+          sub: "credit-conso",
+          freq: "mensuelle",
+          history: [{ y: 2026, m: 8, day: 30, amount: 199.4 }],
+        },
+      ],
+      incomes: [],
+      extras: [],
+      taxoFlagsVersion: 4,
+    });
+    expect(st.expenses).toHaveLength(1);
+    expect(st.expenses[0].label).toBe("Crédit conso");
+    expect(st.extras).toHaveLength(0);
   });
 
   it("totaux budgétaires hors transferts, flux d'épargne exposé, solde exact", () => {

@@ -5,6 +5,13 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.4] — 2026-10-30
+
+### Modifié
+
+- **Séries récurrentes confirmées sur deux mois** : l'import ne planifie plus une série 🔁 qu'après au moins deux mois d'occurrences au même montant. Une occurrence isolée — typiquement des courses ou un transport au prix identique par coïncidence — reste une dépense réelle datée : c'est le modèle d'habitudes qui en tire la moyenne par jour, sans double comptage dans la prévision.
+- **Migration v5** : les séries planifiées ambiguës (libellé « · montant », un seul mois observé) issues des anciens imports redeviennent des dépenses datées — mêmes dates, mêmes montants, aucun solde ne change. Les séries uniques d'un couple (ex. « Crédit conso ») et les séries confirmées sur plusieurs mois sont conservées.
+
 ## [0.30.3] — 2026-10-30
 
 ### Corrigé

@@ -319,7 +319,7 @@ export function subByOperation(catId, opLabel, taxo = TAXONOMIE) {
  * la version — les choix explicitement faits ensuite dans la console
  * d'administration ne sont plus écrasés.
  */
-export const TAXO_FLAGS_VERSION = 4;
+export const TAXO_FLAGS_VERSION = 5;
 
 /**
  * Fusionne les marqueurs 🔁/🔒 des sous-catégories de référence sur une

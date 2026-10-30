@@ -216,6 +216,45 @@ export function migrateState(raw) {
       });
       if (converted.length) s.extras = [...(s.extras ?? []), ...converted];
     }
+    // v5 : une écriture planifiée née d'une coïncidence de montant observée
+    // sur un seul mois (ex. courses au même prix par hasard) n'est pas une
+    // habitude mensuelle — elle redevient une dépense non planifiée datée,
+    // occurrence par occurrence (mêmes dates, mêmes montants : aucun solde
+    // ne change). Ne sont visées que les séries AMBIGUËS — libellé suffixé
+    // « · montant » : plusieurs montants distincts observés pour le même
+    // couple, signature de dépenses variables (alimentation, transports…).
+    // Une série unique pour son couple (ex. « Crédit conso », un seul
+    // montant observé) peut être un vrai engagement mensuel : elle est
+    // conservée. Les séries confirmées sur au moins deux mois restent
+    // planifiées, l'import n'en crée plus d'unimensuelles, et la moyenne
+    // par jour des dépenses variables est portée par le modèle d'habitudes.
+    if ((raw?.taxoFlagsVersion ?? 0) < 5) {
+      const coincidental = [];
+      s.expenses = (s.expenses ?? []).filter((e) => {
+        if (
+          (e.freq !== "mensuelle" && e.freq !== "annuelle") ||
+          !e.history?.length ||
+          new Set(e.history.map((h) => h.y + "-" + h.m)).size >= 2 ||
+          !String(e.label).includes(" · ")
+        ) {
+          return true;
+        }
+        for (const h of e.history) {
+          coincidental.push({
+            id: `${e.id}-occ-${h.y}-${h.m}-${h.day}`,
+            label: e.label,
+            amount: Math.abs(h.amount ?? e.amount),
+            day: h.day,
+            y: h.y,
+            m: h.m,
+            cat: e.cat,
+            sub: e.sub,
+          });
+        }
+        return false;
+      });
+      if (coincidental.length) s.extras = [...(s.extras ?? []), ...coincidental];
+    }
     s.taxoFlagsVersion = TAXO_FLAGS_VERSION;
   }
   // Réglages du modèle prédictif (fenêtre, seuil de présence, statistique) :
