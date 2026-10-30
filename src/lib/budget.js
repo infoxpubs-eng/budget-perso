@@ -589,13 +589,22 @@ export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
 
   // Mois courant : prévision des écritures planifiées sans occurrence réelle
   // (le relevé ne couvre que le passé — le reste du mois reste à prévoir).
+  // Le relevé couvre tout le mois jusqu'à hier : une planifiée à échéance
+  // PASSÉE sans occurrence n'a simplement pas eu lieu ce mois-ci. La
+  // réinjecter à son jour nominal fausserait les soldes quotidiens déjà
+  // réels (double comptage avec les lignes réelles du relevé, creux
+  // fantômes dans la courbe) : seules les échéances à venir — jour
+  // `today` ou après — complètent la fin du mois.
   if (today !== null) {
+    const fromDay = Math.max(1, Math.min(Number(today) || dim, dim));
     for (const e of state.expenses) {
       if (e.freq !== "mensuelle" && e.freq !== "annuelle") continue;
       if (e.freq === "annuelle" && (e.month ?? 1) - 1 !== m) continue;
       if (occurred.has(e.id)) continue;
+      const day = Math.min(e.day, dim);
+      if (day < fromDay) continue;
       tx.push({
-        day: Math.min(e.day, dim),
+        day,
         label: e.label,
         amount: -e.amount,
         type: "out",
@@ -611,6 +620,7 @@ export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
       if (i.mode === "unique" || occurred.has(i.id)) continue;
       if (i.mode === "salaire") {
         const day = salaryPayDay(y, m);
+        if (day < fromDay) continue;
         const rec = isRecurringIncome(i, taxo);
         tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec, real: false, transfer: subTransfer(i.cat ?? "revenus-travail", i.sub ?? "salaire-fixe", taxo) });
         if (i.treizieme && (m === 5 || m === 10)) {
@@ -620,7 +630,9 @@ export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
           tx.push({ day, label: i.label + " · bonus estimé", amount: i.bonus, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec, real: false, transfer: subTransfer(i.cat ?? "revenus-travail", i.sub ?? "salaire-fixe", taxo) });
         }
       } else {
-        tx.push({ day: Math.min(i.day, dim), label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec: isRecurringIncome(i, taxo), real: false, transfer: subTransfer(i.cat ?? "revenus-travail", i.sub ?? "salaire-fixe", taxo) });
+        const day = Math.min(i.day, dim);
+        if (day < fromDay) continue;
+        tx.push({ day, label: i.label, amount: i.amount, type: "in", cat: i.cat ?? "revenus-travail", sub: i.sub ?? "salaire-fixe", inc: false, rec: isRecurringIncome(i, taxo), real: false, transfer: subTransfer(i.cat ?? "revenus-travail", i.sub ?? "salaire-fixe", taxo) });
       }
     }
   }

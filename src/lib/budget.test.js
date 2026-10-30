@@ -1071,6 +1071,21 @@ describe("realTransactionsOfMonth", () => {
     expect(streaming.amount).toBe(-25);
     expect(streaming.real).toBe(false);
   });
+
+  it("mois courant : une planifiée à échéance passée sans occurrence n'est pas réinjectée au passé", () => {
+    // Streaming (jour 15) sans occurrence ; aujourd'hui le 20 : le relevé
+    // couvre le mois jusqu'à hier — l'échéance du 15 est passée, elle n'a pas
+    // eu lieu. Elle ne doit pas creuser artificiellement les jours réels.
+    const tx = realTransactionsOfMonth(st(), 2026, 6, { today: 20 });
+    expect(tx.find((t) => t.label === "Streaming")).toBeUndefined();
+    // Même état au 10 : l'échéance du 15 est à venir, elle est prévue.
+    const tx2 = realTransactionsOfMonth(st(), 2026, 6, { today: 10 });
+    expect(tx2.find((t) => t.label === "Streaming")).toBeDefined();
+    // Et un planned à échéance aujourd'hui reste prévu (non encore observé)
+    const st2 = { ...st(), expenses: [...st().expenses, { id: "e3", label: "Crédit", amount: 199.4, day: 20, cat: "emprunts-conso", sub: "credit-conso", freq: "mensuelle" }] };
+    const tx3 = realTransactionsOfMonth(st2, 2026, 6, { today: 20 });
+    expect(tx3.find((t) => t.label === "Crédit")).toBeDefined();
+  });
 });
 
 describe("realMonthSim — chaînage réel", () => {

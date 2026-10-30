@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.3] — 2026-10-30
+
+### Corrigé
+
+- **Soldes quotidiens du mois courant** : la complétion prévisionnelle (écritures planifiées sans occurrence réelle) réinjectait les échéances à leur jour nominal **même passé** — faussant la courbe du mois en cours par double comptage avec les lignes réelles du relevé (creux fantômes, « découvert prévu » à une date déjà couverte par l'import). Désormais, seules les échéances à venir (jour d'aujourd'hui ou après) complètent la fin du mois : le passé du mois chargé reste purement réel.
+
 ## [0.30.2] — 2026-10-30
 
 ### Modifié
