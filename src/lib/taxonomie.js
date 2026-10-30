@@ -21,7 +21,7 @@ export const TAXONOMIE = [
       { id: "assurance-habitation", label: "Assurance habitation et RC" , recurring: true, incompressible: true },
       { id: "energie", label: "Energie (électricité, gaz, fuel, chauffage…)" , recurring: true, incompressible: true },
       { id: "travaux", label: "Travaux, réparation, entretien, aménagement…" },
-      { id: "frais-exceptionnels", label: "Frais exceptionnels (déménagements, frais agences…)" },
+      { id: "frais-exceptionnels", label: "Frais exceptionnels (déménagements, frais agences…)", oneShot: true },
     ],
   },
   {
@@ -319,7 +319,7 @@ export function subByOperation(catId, opLabel, taxo = TAXONOMIE) {
  * la version — les choix explicitement faits ensuite dans la console
  * d'administration ne sont plus écrasés.
  */
-export const TAXO_FLAGS_VERSION = 2;
+export const TAXO_FLAGS_VERSION = 3;
 
 /**
  * Fusionne les marqueurs 🔁/🔒 des sous-catégories de référence sur une
@@ -342,6 +342,7 @@ export function applyDefaultFlags(taxo) {
           recurring: !!s.recurring || !!refSub.recurring,
           incompressible: !!s.incompressible || !!refSub.incompressible,
           transfer: !!s.transfer || !!refSub.transfer,
+          oneShot: !!s.oneShot || !!refSub.oneShot,
         };
       }),
     };
@@ -422,12 +423,13 @@ export function addSubcategory(taxo, catId, { label, recurring = false, incompre
 }
 
 /**
- * Remplace les indicateurs « récurrente » / « incompressible » d'une
- * sous-catégorie — fonction pure. Les deux valeurs sont requises
- * (passer l'ancienne valeur pour ne changer qu'un indicateur).
+ * Remplace les indicateurs « récurrente » / « incompressible » /
+ * « transfert » / « one-shot » d'une sous-catégorie — fonction pure. Les
+ * valeurs sont requises (passer l'ancienne valeur pour ne changer qu'un
+ * indicateur).
  * @throws {Error} catégorie ou sous-catégorie inconnue
  */
-export function setSubFlags(taxo, catId, subId, { recurring, incompressible, transfer }) {
+export function setSubFlags(taxo, catId, subId, { recurring, incompressible, transfer, oneShot }) {
   const cat = taxo.find((c) => c.id === catId);
   if (!cat) throw new Error("Catégorie inconnue : " + catId);
   if (!cat.subs.some((s) => s.id === subId)) throw new Error("Sous-catégorie inconnue : " + subId);
@@ -439,7 +441,7 @@ export function setSubFlags(taxo, catId, subId, { recurring, incompressible, tra
           subs: c.subs.map((s) =>
             s.id !== subId
               ? s
-              : { ...s, recurring: !!recurring, incompressible: !!incompressible, transfer: !!transfer }
+              : { ...s, recurring: !!recurring, incompressible: !!incompressible, transfer: !!transfer, oneShot: !!oneShot }
           ),
         }
   );
@@ -509,4 +511,20 @@ export function setSubActive(taxo, catId, subId, active) {
 /** Indique si une sous-catégorie est marquée incompressible. */
 export function subIncompressible(catId, subId, taxo = TAXONOMIE) {
   return !!taxSub(catId, subId, taxo)?.incompressible;
+}
+
+/**
+ * Indique si une dépense est « one-shot » : dépense ponctuelle à durée
+ * limitée (ex. frais de dossier, échéance de crédit à durée finie), par
+ * opposition aux dépenses non planifiées de la vie courante (courses,
+ * restaurants, taxis…) dont les habitudes sont apprises. Le marqueur peut
+ * être porté par la ligne (`x.oneShot`) ou dérivé de sa sous-catégorie.
+ */
+export function extraOneShot(x, taxo = TAXONOMIE) {
+  return !!(x?.oneShot ?? subOneShot(x?.cat ?? "?", x?.sub ?? "?", taxo));
+}
+
+/** Indique si une sous-catégorie est marquée one-shot (dépense ponctuelle). */
+export function subOneShot(catId, subId, taxo = TAXONOMIE) {
+  return !!taxSub(catId, subId, taxo)?.oneShot;
 }

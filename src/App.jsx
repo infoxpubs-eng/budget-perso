@@ -44,6 +44,7 @@ import {
   taxSub,
   labelOf,
   envelopeOf,
+  extraOneShot,
   subNature,
   addCategory,
   addSubcategory,
@@ -75,7 +76,7 @@ const DEFAULT_STATE = migrateState({
     { id: uuid(), label: "Salaire", amount: 2500, mode: "salaire", treizieme: true, bonus: 1000 },
     { id: uuid(), label: "Aide / allocations", amount: 180, day: 5, mode: "fixe" },
   ],
-  extras: [], // rien d'exceptionnel par défaut : seules les situations
+  extras: [], // rien de non planifié par défaut : seules les situations
   // explicitement flaguées comme telles entrent dans la simulation
   budgets: { domestiques: 1000, habituelles: 500, sports: 50, loisirs: 120, voyages: 100, exceptionnelles: 300 },
 });
@@ -372,6 +373,8 @@ export default function App() {
   const delExpense = (id) => setState((s) => ({ ...s, expenses: s.expenses.filter((x) => x.id !== id) }));
   const addExtra = (x) => setState((s) => ({ ...s, extras: [...s.extras, x] }));
   const delExtra = (id) => setState((s) => ({ ...s, extras: s.extras.filter((x) => x.id !== id) }));
+  const patchExtra = (id, patch) =>
+    setState((s) => ({ ...s, extras: s.extras.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
   const addIncome = (i) => setState((s) => ({ ...s, incomes: [...s.incomes, i] }));
   const delIncome = (id) => setState((s) => ({ ...s, incomes: s.incomes.filter((x) => x.id !== id) }));
   const setBudget = (cat, n) => setState((s) => ({ ...s, budgets: { ...s.budgets, [cat]: n } }));
@@ -587,7 +590,7 @@ export default function App() {
               className={inputCls + " w-44"}
               value={sim.y + "-" + sim.m}
               onChange={(e) => setSelKey(e.target.value)}
-              title="Mois affiché — 🧾 = mois chargé (données importées ou exceptionnelles)"
+              title="Mois affiché — 🧾 = mois chargé (données importées)"
             >
               {options.map((s) => (
                 <option key={s.y + "-" + s.m} value={s.y + "-" + s.m}>
@@ -607,7 +610,7 @@ export default function App() {
                 ? "border-transparent bg-indigo-600 text-white shadow"
                 : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100") + " rounded-lg px-3 py-2 text-sm font-medium transition"}
               onClick={() => setOnlyLoaded((v) => !v)}
-              title="N'afficher que les mois chargés (dépense exceptionnelle ou revenu unique, typiquement importés d'un relevé)"
+              title="N'afficher que les mois chargés (dépense non planifiée ou revenu unique, typiquement importés d'un relevé)"
             >
               🧾 Mois chargés
             </button>
@@ -934,13 +937,17 @@ export default function App() {
               </Card>
 
               <Card>
-                <h2 className="mb-1 font-semibold">Dépenses exceptionnelles ({state.extras.length})</h2>
-                <p className="mb-3 text-xs text-slate-500">Dépenses unitaires, à une date précise.</p>
+                <h2 className="mb-1 font-semibold">Dépenses non planifiées ({state.extras.length})</h2>
+                <p className="mb-3 text-xs text-slate-500">
+                  Dépenses unitaires, à une date précise : vie courante (l'enveloppe de leur catégorie) ou
+                  one-shot — ponctuelles, à durée limitée (enveloppe « Exceptionnelles », exclues des habitudes).
+                </p>
                 <div className="space-y-2">
                   {state.extras.map((x) => {
                     const c = taxCat(x.cat, taxo);
                     const s = taxSub(x.cat, x.sub, taxo);
-                    const env = ENVELOPPES.find((x2) => x2.id === "exceptionnelles");
+                    const shot = extraOneShot(x, taxo);
+                    const env = ENVELOPPES.find((x2) => x2.id === (shot ? "exceptionnelles" : envelopeOf(x.cat, x.sub, taxo)));
                     return (
                       <div key={x.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
                         <div className="min-w-0">
@@ -949,11 +956,24 @@ export default function App() {
                             <span>{monthLabel(x.y, x.m)} · le {x.day}</span>
                             <Badge color={env ? env.color : "#94a3b8"}>{c ? c.label : "?"}</Badge>
                             {s && <span>{s.label}</span>}
+                            {shot && <Badge color="#8b5cf6">one-shot</Badge>}
                             {x.incompressible && <IncBadge />}
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
                           <span className="font-semibold text-rose-600">− {fmt(x.amount)}</span>
+                          <button
+                            className={
+                              "rounded-md px-2 py-1 text-xs font-medium transition " +
+                              (shot ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-400 hover:bg-slate-200")
+                            }
+                            onClick={() => patchExtra(x.id, { oneShot: !shot })}
+                            title={shot
+                              ? "Basculer en dépense de vie courante (enveloppe de sa catégorie, compte dans les habitudes)"
+                              : "Basculer en one-shot (enveloppe « Exceptionnelles », exclue des habitudes)"}
+                          >
+                            one-shot
+                          </button>
                           <button
                             className="rounded-md px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
                             onClick={() => delExtra(x.id)}
@@ -967,7 +987,7 @@ export default function App() {
                   })}
                   {state.extras.length === 0 && (
                     <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
-                      Aucune dépense exceptionnelle.
+                      Aucune dépense non planifiée.
                     </div>
                   )}
                 </div>
@@ -1046,7 +1066,7 @@ export default function App() {
             <Card>
               <h2 className="mb-1 font-semibold">Budget prévisionnel — {sim.label}</h2>
               <p className="mb-4 text-xs text-slate-500">
-                Comparez l'enveloppe que vous souhaitez consacrer à chaque type de dépenses avec le total réellement planifié ce mois-ci (récurrentes + exceptionnelles).
+                Comparez l'enveloppe que vous souhaitez consacrer à chaque type de dépenses avec le total réellement planifié ce mois-ci (récurrentes + non planifiées).
                 Les dépenses sont rangées automatiquement par catégorie bancaire.
               </p>
               <div className="space-y-4">
@@ -1209,7 +1229,7 @@ export default function App() {
                 Tendance par couple sans écriture planifiée, apprise des relevés importés :
                 {est.stat === "moyenne" ? "moyenne" : "médiane"} des mois observés sur une fenêtre de {est.window} mois complets
                 (zéros inclus), provisionnée si le couple est présent dans au moins
-                {Math.round(est.presenceMin * 100)} % des mois — les dépenses exceptionnelles
+                {Math.round(est.presenceMin * 100)} % des mois — les dépenses one-shot
                 n'influencent pas la prévision. Restant = tendance − déjà dépensé ce mois-ci
                 (les couples planifiés sont exclus : pas de double comptage). Réglages dans 🛠️ Admin.
                 {isCurrentMonth && prov.total > 0 && (
@@ -1288,976 +1308,3 @@ export default function App() {
                 <p className="mb-3 text-xs text-slate-500">
                   Pour chaque mois simulé : débits et crédits récurrents uniquement, puis point bas de la trajectoire (suivant ces dates stables) et solde en fin de mois.
                 </p>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-slate-500">
-                        <th className="py-1.5 pr-2 font-medium">Mois</th>
-                        <th className="py-1.5 pr-2 font-medium text-right">Éch.</th>
-                        <th className="py-1.5 pr-2 font-medium text-right">Débits 🔁</th>
-                        <th className="py-1.5 pr-2 font-medium text-right">Crédits 🔁</th>
-                        <th className="py-1.5 pr-2 font-medium text-right">Point bas</th>
-                        <th className="py-1.5 font-medium text-right">Fin de mois</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {recYear.map((r, i) => (
-                        <tr key={i} className={"border-b border-slate-100" + (r.label === sim.label ? " bg-indigo-50/50" : "")}>
-                          <td className="py-1.5 pr-2 font-medium text-slate-700">{r.label}</td>
-                          <td className="py-1.5 pr-2 text-right text-slate-500">{r.days} j</td>
-                          <td className="py-1.5 pr-2 text-right text-rose-600">− {fmt(r.totalOut)}</td>
-                          <td className="py-1.5 pr-2 text-right text-emerald-600">+ {fmt(r.totalIn)}</td>
-                          <td className={"py-1.5 pr-2 text-right font-semibold " + (r.min < 0 ? "text-rose-600" : "text-amber-600")}>
-                            {fmt(r.min)}{r.min < 0 ? " ⚠️" : ""}
-                          </td>
-                          <td className={"py-1.5 text-right font-semibold " + (r.end < 0 ? "text-rose-600" : "text-slate-700")}>{fmt(r.end)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-            </div>
-          </div>
-        )}
-
-        {/* ------------------------------ ADMIN ------------------------------ */}
-        {tab === "admin" && <AdminPanel state={state} setState={setState} prov={prov} simLabel={sim.label} />}
-
-        {/* ----------------------- DIALOGUE IMPORT CSV ----------------------- */}
-        {csvImport && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-            <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl bg-white p-6 shadow-xl">
-              <h2 className="text-lg font-semibold">Import du relevé</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {csvImport.parsed.rows.length + csvImport.parsed.ignored} ligne(s) chargée(s) ·{" "}
-                {csvImport.r.couvertesOut +
-                  csvImport.r.couvertesIn +
-                  csvImport.r.extras.length +
-                  csvImport.r.incomes.length +
-                  csvImport.r.recurrentes.length}{" "}
-                intégrée(s) · {csvImport.parsed.ignored} ignorée(s)
-              </p>
-
-              <div className="mt-4 flex-1 space-y-2 overflow-y-auto text-sm">
-                {csvImport.r.newExpenses.length > 0 && (
-                  <div className="rounded-lg bg-slate-50 p-3">
-                    <div className="font-medium text-slate-700">
-                      {csvImport.r.newExpenses.length} écriture(s) récurrente(s) planifiée(s)
-                    </div>
-                    <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
-                      {csvImport.r.newExpenses.map((e) => (
-                        <li key={e.id}>
-                          · {e.label} — {fmt(e.amount)} le {e.day} du mois{e.incompressible ? " 🔒" : ""}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {csvImport.r.newIncomes.length > 0 && (
-                  <div className="rounded-lg bg-slate-50 p-3">
-                    <div className="font-medium text-slate-700">
-                      {csvImport.r.newIncomes.length} revenu(s) récurrent(s) planifié(s)
-                    </div>
-                    <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
-                      {csvImport.r.newIncomes.map((x) => (
-                        <li key={x.id}>· {x.label} — {fmt(x.amount)} le {x.day} du mois</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {csvImport.r.extras.length > 0 && (
-                  <div className="rounded-lg bg-slate-50 p-3 text-slate-700">
-                    {csvImport.r.extras.length} dépense(s) exceptionnelle(s), total {fmt(csvImport.r.depensesTotal)}
-                  </div>
-                )}
-                {csvImport.r.incomes.length > 0 && (
-                  <div className="rounded-lg bg-slate-50 p-3 text-slate-700">
-                    {csvImport.r.incomes.length} revenu(s) unique(s), total {fmt(csvImport.r.revenusTotal)}
-                  </div>
-                )}
-                {csvImport.r.recurrentes.length > 0 && (
-                  <div className="rounded-lg bg-slate-50 p-3 text-slate-700">
-                    {csvImport.r.recurrentes.length} ligne(s) déjà couverte(s) par une écriture planifiée (non
-                    importées en double)
-                  </div>
-                )}
-                {(csvImport.r.newExpenses.length > 0 || csvImport.r.recurrentes.length > 0) && (
-                  <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
-                    Les dates réelles et les montants observés des couples 🔁 sont conservés sur leurs
-                    écritures (historique pour le futur suivi réel vs prévisionnel) ; un même relevé
-                    réimporté n'ajoute aucun doublon. Le montant prévisionnel d'une écriture 🔁
-                    rattachée suit la dernière occurrence observée.
-                  </div>
-                )}
-
-                {csvImport.r.taxoAdditions.length > 0 && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                    <div className="font-semibold text-amber-800">
-                      {csvImport.r.taxoAdditions.length} couple(s) absent(s) de la nomenclature
-                    </div>
-                    <p className="mt-1 text-xs text-amber-700">
-                      Rangez chaque couple dans une catégorie (défaut « À classer ») et renommez-le si besoin ;
-                      les écritures correspondantes suivront.
-                    </p>
-                    <div className="mt-2 space-y-2">
-                      {csvImport.r.taxoAdditions.map((a, i) => (
-                        <div key={i} className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-medium text-slate-600">
-                            {a.label} · {a.nature === "revenu" ? "revenu" : "dépense"} →
-                          </span>
-                          <input
-                            type="text"
-                            className={inputCls + " min-w-[8rem] flex-1"}
-                            value={csvImport.choices[i]?.label ?? a.label}
-                            onChange={(e) => setCsvChoice(i, { label: e.target.value })}
-                            title="Libellé du couple"
-                          />
-                          <select
-                            className={inputCls}
-                            value={csvImport.choices[i]?.cat ?? A_CLASSER}
-                            onChange={(e) => setCsvChoice(i, { cat: e.target.value })}
-                            title="Catégorie d'accueil"
-                          >
-                            <option value={A_CLASSER}>À classer</option>
-                            {(a.nature === "revenu"
-                              ? taxo.filter((c) => c.active !== false && c.nature === "revenu")
-                              : taxo.filter((c) => c.active !== false && c.nature === "depense")
-                            )
-                              .filter((c) => c.id !== A_CLASSER)
-                              .map((c) => (
-                                <option key={c.id} value={c.id}>{c.label}</option>
-                              ))}
-                          </select>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 flex justify-end gap-2">
-                <button className={btnCls} onClick={() => setCsvImport(null)}>
-                  Annuler
-                </button>
-                <button
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-                  onClick={confirmCsvImport}
-                >
-                  Importer
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ============================== Formulaires ============================== */
-
-/**
- * Pour chaque couple catégorie|sous-catégorie : nombre de dépenses récurrentes
- * qui l'utilisent déjà, dont combien d'incompressibles, et leurs libellés
- * (3 premiers). Sert à identifier les sous-catégories récurrentes dans les
- * formulaires de dépense.
- */
-function recurrencesBySub(expenses) {
-  const map = new Map();
-  for (const e of expenses ?? []) {
-    if (!e.sub) continue;
-    const k = (e.cat ?? "") + "|" + e.sub;
-    const cur = map.get(k) ?? { count: 0, inc: 0, labels: [] };
-    cur.count++;
-    if (e.incompressible) cur.inc++;
-    if (cur.labels.length < 3) cur.labels.push(e.label);
-    map.set(k, cur);
-  }
-  return map;
-}
-
-function ExpenseForm({ expenses = [], onAdd, taxo = TAXONOMIE }) {
-  const DEPCATS = useMemo(() => depenseCats(taxo), [taxo]);
-  const recBySub = useMemo(() => recurrencesBySub(expenses), [expenses]);
-  const [label, setLabel] = useState("");
-  const [amount, setAmount] = useState(0);
-  const [day, setDay] = useState(1);
-  const [cat, setCat] = useState("logement");
-  const [sub, setSub] = useState("loyers-charges");
-  const [freq, setFreq] = useState("mensuelle");
-  const [month, setMonth] = useState(1);
-  const [inc, setInc] = useState(false);
-
-  const subs = DEPCATS.find((c) => c.id === cat)?.subs ?? [];
-
-  const changeCat = (id) => {
-    setCat(id);
-    const first = DEPCATS.find((c) => c.id === id)?.subs[0];
-    setSub(first?.id ?? "");
-    setInc(!!first?.incompressible);
-  };
-
-  const changeSub = (id) => {
-    setSub(id);
-    setInc(!!subs.find((s) => s.id === id)?.incompressible);
-  };
-
-  const submit = () => {
-    if (!label.trim() || amount <= 0) return;
-    onAdd({
-      id: uuid(),
-      label: label.trim(),
-      amount,
-      day: Math.min(31, Math.max(1, day)),
-      cat,
-      sub: sub || undefined,
-      freq,
-      month: freq === "annuelle" ? month : undefined,
-      incompressible: inc,
-    });
-    setLabel("");
-    setAmount(0);
-    setDay(1);
-    setInc(false);
-  };
-
-  return (
-    <Card>
-      <h2 className="mb-3 font-semibold">Ajouter une dépense récurrente</h2>
-      <div className="space-y-3">
-        <Field label="Libellé">
-          <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex. Loyer" />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Montant (€)">
-            <NumInput value={amount} onChange={setAmount} />
-          </Field>
-          <Field label="Jour du mois (1–31)">
-            <input
-              className={inputCls}
-              type="number"
-              min={1}
-              max={31}
-              value={day}
-              onChange={(e) => setDay(Number(e.target.value))}
-            />
-          </Field>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Catégorie">
-            <select className={inputCls} value={cat} onChange={(e) => changeCat(e.target.value)}>
-              {DEPCATS.map((c) => (
-                <option key={c.id} value={c.id}>{c.label}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Sous-catégorie">
-            <select className={inputCls} value={sub} onChange={(e) => changeSub(e.target.value)} disabled={subs.length === 0}>
-              {subs.length === 0 && <option value="">—</option>}
-              {subs.map((s) => {
-                const rec = recBySub.get(cat + "|" + s.id);
-                return (
-                  <option key={s.id} value={s.id}>
-                    {s.label + (rec ? " · récurrente" : "") + (s.incompressible || rec?.inc ? " 🔒" : "") + (s.recurring ? " 🔁" : "")}
-                  </option>
-                );
-              })}
-            </select>
-          </Field>
-        </div>
-        {recBySub.get(cat + "|" + sub) && (
-          <p className="text-xs text-amber-700">
-            {"⚠️ Sous-catégorie déjà couverte par " +
-              recBySub.get(cat + "|" + sub).count +
-              " dépense(s) récurrente(s)" +
-              (recBySub.get(cat + "|" + sub).inc > 0
-                ? ", dont " + recBySub.get(cat + "|" + sub).inc + " incompressible(s) 🔒"
-                : "") +
-              " (" + recBySub.get(cat + "|" + sub).labels.join(", ") + ")"}
-          </p>
-        )}
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Fréquence">
-            <select className={inputCls} value={freq} onChange={(e) => setFreq(e.target.value)}>
-              <option value="mensuelle">Mensuelle</option>
-              <option value="annuelle">Annuelle</option>
-            </select>
-          </Field>
-          {freq === "annuelle" && (
-            <Field label="Mois">
-              <select className={inputCls} value={month} onChange={(e) => setMonth(Number(e.target.value))}>
-                {MONTHS.map((m, i) => (
-                  <option key={m} value={i + 1}>{m}</option>
-                ))}
-              </select>
-            </Field>
-          )}
-        </div>
-        <CheckRow checked={inc} onChange={setInc} label="Dépense incompressible 🔒" />
-        <button
-          className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
-          onClick={submit}
-          disabled={!label.trim() || amount <= 0}
-        >
-          Ajouter la dépense
-        </button>
-      </div>
-    </Card>
-  );
-}
-
-function ExtraForm({ sims, monthIdx, expenses = [], onAdd, taxo = TAXONOMIE }) {
-  const DEPCATS = useMemo(() => depenseCats(taxo), [taxo]);
-  const recBySub = useMemo(() => recurrencesBySub(expenses), [expenses]);
-  const [label, setLabel] = useState("");
-  const [amount, setAmount] = useState(0);
-  const [day, setDay] = useState(1);
-  const [simIdx, setSimIdx] = useState(monthIdx);
-  const [cat, setCat] = useState("logement");
-  const [sub, setSub] = useState("frais-exceptionnels");
-  const [inc, setInc] = useState(false);
-
-  // Suit le mois sélectionné en en-tête tant que l'utilisateur n'a pas choisi
-  useEffect(() => { setSimIdx(monthIdx); }, [monthIdx]);
-
-  const subs = DEPCATS.find((c) => c.id === cat)?.subs ?? [];
-
-  const changeCat = (id) => {
-    setCat(id);
-    const first = DEPCATS.find((c) => c.id === id)?.subs[0];
-    setSub(first?.id ?? "");
-    setInc(!!first?.incompressible);
-  };
-
-  const changeSub = (id) => {
-    setSub(id);
-    setInc(!!subs.find((s) => s.id === id)?.incompressible);
-  };
-
-  const target = sims[Math.min(simIdx, 11)];
-  const submit = () => {
-    if (!label.trim() || amount <= 0) return;
-    onAdd({
-      id: uuid(),
-      label: label.trim(),
-      amount,
-      day: Math.min(31, Math.max(1, day)),
-      y: target.y,
-      m: target.m,
-      cat,
-      sub: sub || undefined,
-      incompressible: inc,
-    });
-    setLabel("");
-    setAmount(0);
-    setDay(1);
-    setInc(false);
-  };
-
-  return (
-    <Card>
-      <h2 className="mb-1 font-semibold">Ajouter une dépense exceptionnelle</h2>
-      <p className="mb-3 text-xs text-slate-500">Dépense unitaire, une seule fois, à une date précise.</p>
-      <div className="space-y-3">
-        <Field label="Libellé">
-          <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex. Réparation voiture" />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Montant (€)">
-            <NumInput value={amount} onChange={setAmount} />
-          </Field>
-          <Field label="Jour du mois (1–31)">
-            <input
-              className={inputCls}
-              type="number"
-              min={1}
-              max={31}
-              value={day}
-              onChange={(e) => setDay(Number(e.target.value))}
-            />
-          </Field>
-        </div>
-        <Field label="Mois">
-          <select className={inputCls} value={simIdx} onChange={(e) => setSimIdx(Number(e.target.value))}>
-            {sims.map((s, i) => (
-              <option key={i} value={i}>{s.label}</option>
-            ))}
-          </select>
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Catégorie">
-            <select className={inputCls} value={cat} onChange={(e) => changeCat(e.target.value)}>
-              {DEPCATS.map((c) => (
-                <option key={c.id} value={c.id}>{c.label}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Sous-catégorie">
-            <select className={inputCls} value={sub} onChange={(e) => changeSub(e.target.value)} disabled={subs.length === 0}>
-              {subs.length === 0 && <option value="">—</option>}
-              {subs.map((s) => {
-                const rec = recBySub.get(cat + "|" + s.id);
-                return (
-                  <option key={s.id} value={s.id}>
-                    {s.label + (rec ? " · récurrente" : "") + (s.incompressible || rec?.inc ? " 🔒" : "") + (s.recurring ? " 🔁" : "")}
-                  </option>
-                );
-              })}
-            </select>
-          </Field>
-        </div>
-        <CheckRow checked={inc} onChange={setInc} label="Dépense incompressible 🔒" />
-        <button
-          className="w-full rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
-          onClick={submit}
-          disabled={!label.trim() || amount <= 0}
-        >
-          Ajouter la dépense exceptionnelle
-        </button>
-      </div>
-    </Card>
-  );
-}
-
-function IncomeForm({ sims, monthIdx, onAdd, taxo = TAXONOMIE }) {
-  const ROPTS = useMemo(() => revenuOptions(taxo), [taxo]);
-  const [label, setLabel] = useState("");
-  const [amount, setAmount] = useState(0);
-  const [mode, setMode] = useState("salaire");
-  const [day, setDay] = useState(27);
-  const [treizieme, setTreizieme] = useState(false);
-  const [bonus, setBonus] = useState(0);
-  const [rcat, setRcat] = useState("revenus-travail|salaire-fixe");
-  const [uIdx, setUIdx] = useState(monthIdx);
-
-  // Suit le mois sélectionné en en-tête tant que l'utilisateur n'a pas choisi
-  useEffect(() => { setUIdx(monthIdx); }, [monthIdx]);
-
-  const target = sims[Math.min(uIdx, 11)];
-
-  const submit = () => {
-    if (!label.trim() || amount <= 0) return;
-    const [cat, sub] = rcat.split("|");
-    onAdd({
-      id: uuid(),
-      label: label.trim(),
-      amount,
-      mode,
-      day: mode === "salaire" ? undefined : Math.min(31, Math.max(1, day)),
-      y: mode === "unique" ? target.y : undefined,
-      m: mode === "unique" ? target.m : undefined,
-      treizieme: mode === "salaire" ? treizieme : false,
-      bonus: mode === "salaire" ? bonus : 0,
-      cat,
-      sub: sub || undefined,
-    });
-    setLabel("");
-    setAmount(0);
-    setTreizieme(false);
-    setBonus(0);
-  };
-
-  return (
-    <Card>
-      <h2 className="mb-3 font-semibold">Ajouter une entrée d'argent</h2>
-      <div className="space-y-3">
-        <Field label="Libellé">
-          <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex. Salaire" />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Montant (€)">
-            <NumInput value={amount} onChange={setAmount} />
-          </Field>
-          <Field label="Mode de versement">
-            <select className={inputCls} value={mode} onChange={(e) => setMode(e.target.value)}>
-              <option value="salaire">Salaire (avant-veille du dernier jour ouvré)</option>
-              <option value="fixe">Jour fixe du mois (récurrent)</option>
-              <option value="unique">Revenu unique (une seule fois)</option>
-            </select>
-          </Field>
-        </div>
-        {mode === "fixe" && (
-          <Field label="Jour du mois (1–31)">
-            <input
-              className={inputCls}
-              type="number"
-              min={1}
-              max={31}
-              value={day}
-              onChange={(e) => setDay(Number(e.target.value))}
-            />
-          </Field>
-        )}
-        {mode === "unique" && (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Jour du mois (1–31)">
-              <input
-                className={inputCls}
-                type="number"
-                min={1}
-                max={31}
-                value={day}
-                onChange={(e) => setDay(Number(e.target.value))}
-              />
-            </Field>
-            <Field label="Mois">
-              <select className={inputCls} value={uIdx} onChange={(e) => setUIdx(Number(e.target.value))}>
-                {sims.map((s, i) => (
-                  <option key={i} value={i}>{s.label}</option>
-                ))}
-              </select>
-            </Field>
-          </div>
-        )}
-        <Field label="Catégorie bancaire">
-          <select className={inputCls} value={rcat} onChange={(e) => setRcat(e.target.value)}>
-            {ROPTS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </Field>
-        {mode === "salaire" && (
-          <div className="space-y-2 rounded-lg bg-slate-50 p-3">
-            <CheckRow
-              checked={treizieme}
-              onChange={setTreizieme}
-              label="13ᵉ mois en 2 fois : ½ versée avec le salaire de juin, ½ avec celui de novembre"
-            />
-            <Field label="Bonus estimé, versé avec le salaire de mars (€)">
-              <NumInput value={bonus} onChange={setBonus} />
-            </Field>
-          </div>
-        )}
-        <button
-          className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
-          onClick={submit}
-          disabled={!label.trim() || amount <= 0}
-        >
-          Ajouter le revenu
-        </button>
-      </div>
-    </Card>
-  );
-}
-
-/* ============================== Console d'administration ============================== */
-
-/**
- * Nomenclature bancaire : liste des couples catégorie / sous-catégorie,
- * indicateurs « récurrente 🔁 » / « incompressible 🔒 » modifiables en un
- * clic, et ajout d'un couple (sous-catégorie dans une catégorie existante
- * ou nouvelle catégorie). La nomenclature est persistée dans l'état
- * (state.taxonomie) et utilisée par les formulaires, l'import CSV et les
- * totaux du mois.
- */
-function AdminPanel({ state, setState, prov, simLabel }) {
-  const taxo = state.taxonomie ?? TAXONOMIE;
-
-  // Nombre de dépenses récurrentes utilisant chaque couple cat|sub
-  const useBySub = useMemo(() => {
-    const m = new Map();
-    for (const e of state.expenses ?? []) {
-      const k = (e.cat ?? "") + "|" + (e.sub ?? "");
-      m.set(k, (m.get(k) ?? 0) + 1);
-    }
-    return m;
-  }, [state.expenses]);
-
-  const [mode, setMode] = useState("existante"); // "existante" | "nouvelle"
-  const [catId, setCatId] = useState(taxo[0]?.id ?? "");
-  const [catLabel, setCatLabel] = useState("");
-  const [catNature, setCatNature] = useState("depense");
-  const [catEnv, setCatEnv] = useState("domestiques");
-  const [subLabel, setSubLabel] = useState("");
-  const [subNat, setSubNat] = useState("auto"); // auto | depense | revenu
-  const [recurring, setRecurring] = useState(false);
-  const [incompressible, setIncompressible] = useState(false);
-  const [err, setErr] = useState("");
-  const [okMsg, setOkMsg] = useState("");
-  // Élément en cours de renommage : { type: "cat"|"sub", catId, subId? }
-  const [editing, setEditing] = useState(null);
-  const [editLabel, setEditLabel] = useState("");
-
-  const toggleFlag = (cid, sub, flag) =>
-    setState((s) => ({
-      ...s,
-      taxonomie: setSubFlags(s.taxonomie ?? taxo, cid, sub.id, {
-        recurring: flag === "recurring" ? !sub.recurring : !!sub.recurring,
-        incompressible: flag === "incompressible" ? !sub.incompressible : !!sub.incompressible,
-        transfer: flag === "transfer" ? !sub.transfer : !!sub.transfer,
-      }),
-    }));
-
-  const startEdit = (type, cid, sid, current) => {
-    setEditing({ type, catId: cid, subId: sid });
-    setEditLabel(current);
-    setErr("");
-  };
-
-  const cancelEdit = () => {
-    setEditing(null);
-    setEditLabel("");
-  };
-
-  const confirmEdit = () => {
-    setErr("");
-    try {
-      setState((s) => ({
-        ...s,
-        taxonomie:
-          editing.type === "cat"
-            ? renameCategory(s.taxonomie ?? taxo, editing.catId, editLabel)
-            : renameSubcategory(s.taxonomie ?? taxo, editing.catId, editing.subId, editLabel),
-      }));
-      setEditing(null);
-      setEditLabel("");
-    } catch (e) {
-      setErr(e.message);
-    }
-  };
-
-  const toggleActive = (cid, sid, active) => {
-    setErr("");
-    try {
-      setState((s) => ({
-        ...s,
-        taxonomie: sid
-          ? setSubActive(s.taxonomie ?? taxo, cid, sid, active)
-          : setCategoryActive(s.taxonomie ?? taxo, cid, active),
-      }));
-    } catch (e) {
-      setErr(e.message);
-    }
-  };
-
-  const submit = () => {
-    setErr("");
-    setOkMsg("");
-    try {
-      let next = state.taxonomie ?? taxo;
-      let targetCat = catId;
-      let msgCat = "";
-      if (mode === "nouvelle") {
-        next = addCategory(next, { label: catLabel, nature: catNature, env: catEnv });
-        targetCat = next[next.length - 1].id;
-        setCatId(targetCat);
-        msgCat = catLabel.trim() + " · ";
-      }
-      next = addSubcategory(next, targetCat, {
-        label: subLabel,
-        recurring,
-        incompressible,
-        nature: subNat === "auto" ? undefined : subNat,
-      });
-      setState((s) => ({ ...s, taxonomie: next }));
-      setOkMsg("✅ " + msgCat + subLabel.trim() + " ajouté à la nomenclature");
-      setCatLabel("");
-      setSubLabel("");
-      setRecurring(false);
-      setIncompressible(false);
-      setSubNat("auto");
-      setMode("existante");
-    } catch (e) {
-      setErr(e.message);
-    }
-  };
-
-  const est = state.estimation ?? DEFAULT_ESTIMATION;
-  const setEst = (key, value) =>
-    setState((s) => ({ ...s, estimation: { ...(s.estimation ?? DEFAULT_ESTIMATION), [key]: value } }));
-
-  return (
-    <div className="grid gap-6 lg:grid-cols-3">
-      <div className="space-y-6 lg:col-span-2">
-        <Card>
-          <h2 className="mb-1 font-semibold">Modèle prédictif — habitudes non planifiées</h2>
-          <p className="mb-4 text-xs text-slate-500">
-            Réglages de la provision qui retranche le KPI « Solde fin de mois probable » (onglet
-            Aperçu) : fenêtre d'apprentissage (mois complets, zéros inclus), présence minimale
-            (fraction des mois de la fenêtre — en dessous de la moitié, une médiane à zéros
-            inclus est déjà nulle : le seuil ne mord alors pas), statistique de tendance
-            (la médiane ignore les extrêmes, la moyenne suit les gros mois). Sans relevé
-            importé, la provision est nulle ; les réglages sont persistés avec l'état.
-          </p>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Fenêtre (mois)">
-              <div title="Fenêtre d'apprentissage (1 à 24 mois complets)">
-                <NumInput value={est.window} onChange={(v) => setEst("window", Math.max(1, Math.min(24, Math.round(v))))} />
-              </div>
-            </Field>
-            <Field label="Présence minimale (%)">
-              <div title="Présence minimale dans la fenêtre (0 à 100 %)">
-                <NumInput value={Math.round(est.presenceMin * 100)} onChange={(v) => setEst("presenceMin", Math.max(0, Math.min(100, Math.round(v))) / 100)} />
-              </div>
-            </Field>
-            <Field label="Statistique">
-              <select
-                className={inputCls}
-                title="Statistique de tendance"
-                value={est.stat}
-                onChange={(e) => setEst("stat", e.target.value)}
-              >
-                <option value="mediane">Médiane (ignore les extrêmes)</option>
-                <option value="moyenne">Moyenne (suit les gros mois)</option>
-              </select>
-            </Field>
-          </div>
-          <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            Provision « habitudes » de {simLabel ?? "ce mois"} :{" "}
-            <span className="font-semibold text-rose-600">− {fmt(prov?.total ?? 0)}</span>{" "}
-            sur {prov?.lines.length ?? 0} couple(s) — recalculée à chaque réglage.
-          </div>
-        </Card>
-
-        <Card>
-          <h2 className="mb-1 font-semibold">Nomenclature — catégories et sous-catégories</h2>
-          <p className="mb-4 text-xs text-slate-500">
-            Cliquez sur 🔁, 🔒 ou ⇄ pour marquer une sous-catégorie récurrente, incompressible ou
-            « transfert interne » (virement d'épargne : les mouvements du couple comptent dans le
-            solde mais pas dans les totaux budgétaires — ils alimentent le KPI « Flux épargne net ») ;
-            sur ✏️ pour renommer ; sur ⏸️ pour désactiver (▶️ pour réactiver).
-            Une sous-catégorie incompressible rend toutes ses dépenses incompressibles dans les
-            totaux du mois et coche automatiquement « incompressible » dans les formulaires.
-            Un élément désactivé disparaît des formulaires et de l'import CSV, mais les dépenses
-            existantes conservent leurs données et restent comptées dans les totaux.
-          </p>
-          <div className="space-y-3">
-            {taxo.map((c) => {
-              const env = ENVELOPPES.find((x) => x.id === c.env);
-              return (
-                <div key={c.id} className="overflow-hidden rounded-lg border border-slate-200">
-                  <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
-                    {editing && editing.type === "cat" && editing.catId === c.id ? (
-                      <div className="flex min-w-0 flex-1 items-center gap-1">
-                        <input
-                          autoFocus
-                          className={inputCls}
-                          value={editLabel}
-                          onChange={(e) => setEditLabel(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") confirmEdit();
-                            if (e.key === "Escape") cancelEdit();
-                          }}
-                        />
-                        <button title="Valider" onClick={confirmEdit}
-                          className="rounded-md px-2 py-1 text-xs text-emerald-600 hover:bg-emerald-50">✓</button>
-                        <button title="Annuler" onClick={cancelEdit}
-                          className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-200">✕</button>
-                      </div>
-                    ) : (
-                      <>
-                        <span className={"text-sm font-semibold" + (c.active === false ? " text-slate-400 line-through" : "")}>{c.label}</span>
-                        {c.active === false && <Badge color="#94a3b8">désactivée</Badge>}
-                      </>
-                    )}
-                    <Badge color={c.nature === "revenu" ? "#10b981" : "#64748b"}>
-                      {c.nature === "revenu" ? "revenu" : "dépense"}
-                    </Badge>
-                    {env && <Badge color={env.color}>{env.label}</Badge>}
-                    <span className="text-xs text-slate-400">{c.subs.length} sous-catégorie(s)</span>
-                    <div className="ml-auto flex gap-1">
-                      <button title="Renommer" onClick={() => startEdit("cat", c.id, null, c.label)}
-                        className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-200 hover:text-slate-600">✏️</button>
-                      <button
-                        title={c.active === false ? "Réactiver" : "Désactiver"}
-                        onClick={() => toggleActive(c.id, null, c.active === false)}
-                        className={"rounded-md px-2 py-1 text-xs transition " + (
-                          c.active === false
-                            ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                            : "text-slate-400 hover:bg-slate-200 hover:text-slate-600"
-                        )}
-                      >
-                        {c.active === false ? "▶️" : "⏸️"}
-                      </button>
-                    </div>
-                  </div>
-                  {c.subs.length > 0 && (
-                    <div className="divide-y divide-slate-100">
-                      {c.subs.map((s) => {
-                        const used = useBySub.get(c.id + "|" + s.id) ?? 0;
-                        return (
-                          <div
-                            key={s.id}
-                            className={
-                              "flex flex-wrap items-center justify-between gap-2 px-3 py-2" +
-                              (s.active === false ? " opacity-60" : "")
-                            }
-                          >
-                            {editing && editing.type === "sub" && editing.catId === c.id && editing.subId === s.id ? (
-                              <div className="flex min-w-0 flex-1 items-center gap-1">
-                                <input
-                                  autoFocus
-                                  className={inputCls}
-                                  value={editLabel}
-                                  onChange={(e) => setEditLabel(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") confirmEdit();
-                                    if (e.key === "Escape") cancelEdit();
-                                  }}
-                                />
-                                <button title="Valider" onClick={confirmEdit}
-                                  className="rounded-md px-2 py-1 text-xs text-emerald-600 hover:bg-emerald-50">✓</button>
-                                <button title="Annuler" onClick={cancelEdit}
-                                  className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-200">✕</button>
-                              </div>
-                            ) : (
-                              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                                <span className={"text-sm" + (s.active === false ? " text-slate-400 line-through" : "")}>{s.label}</span>
-                                {s.active === false && <Badge color="#94a3b8">désactivée</Badge>}
-                                {subNature(c, s) === "revenu" && c.nature === "depense" && (
-                                  <Badge color="#10b981">revenu</Badge>
-                                )}
-                                {used > 0 && (
-                                  <span className="text-xs text-slate-400">
-                                    {used} dépense(s) récurrente(s)
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            <div className="flex gap-1">
-                              <button title="Renommer" onClick={() => startEdit("sub", c.id, s.id, s.label)}
-                                className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-200 hover:text-slate-600">✏️</button>
-                              <button
-                                title={s.active === false ? "Réactiver" : "Désactiver"}
-                                onClick={() => toggleActive(c.id, s.id, s.active === false)}
-                                className={"rounded-md px-2 py-1 text-xs transition " + (
-                                  s.active === false
-                                    ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                                    : "text-slate-400 hover:bg-slate-200 hover:text-slate-600"
-                                )}
-                              >
-                                {s.active === false ? "▶️" : "⏸️"}
-                              </button>
-                              <button
-                                title="Marquer comme récurrente"
-                                onClick={() => toggleFlag(c.id, s, "recurring")}
-                                className={
-                                  "rounded-md px-2 py-1 text-xs font-medium transition " +
-                                  (s.recurring
-                                    ? "bg-indigo-600 text-white"
-                                    : "bg-slate-100 text-slate-400 hover:bg-slate-200")
-                                }
-                              >
-                                🔁 récurrente
-                              </button>
-                              <button
-                                title="Marquer comme transfert interne (virement d'épargne : hors budget, suivi par le KPI « Flux épargne net »)"
-                                onClick={() => toggleFlag(c.id, s, "transfer")}
-                                className={
-                                  "rounded-md px-2 py-1 text-xs font-medium transition " +
-                                  (s.transfer
-                                    ? "bg-teal-600 text-white"
-                                    : "bg-slate-100 text-slate-400 hover:bg-slate-200")
-                                }
-                              >
-                                ⇄ transfert
-                              </button>
-                              <button
-                                title="Marquer comme incompressible"
-                                onClick={() => toggleFlag(c.id, s, "incompressible")}
-                                className={
-                                  "rounded-md px-2 py-1 text-xs font-medium transition " +
-                                  (s.incompressible
-                                    ? "bg-rose-600 text-white"
-                                    : "bg-slate-100 text-slate-400 hover:bg-slate-200")
-                                }
-                              >
-                                🔒 incompressible
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      </div>
-
-      <div className="space-y-6">
-        <Card>
-          <h2 className="mb-1 font-semibold">Ajouter un couple (catégorie · sous-catégorie)</h2>
-          <p className="mb-3 text-xs text-slate-500">
-            La nouvelle sous-catégorie est immédiatement disponible dans les formulaires et
-            l'import CSV.
-          </p>
-          <div className="space-y-3">
-            <Field label="Catégorie">
-              <select className={inputCls} value={mode} onChange={(e) => setMode(e.target.value)}>
-                <option value="existante">Catégorie existante…</option>
-                <option value="nouvelle">➕ Nouvelle catégorie</option>
-              </select>
-            </Field>
-            {mode === "existante" ? (
-              <Field label="Choisir la catégorie">
-                <select className={inputCls} value={catId} onChange={(e) => setCatId(e.target.value)}>
-                  {taxo.filter((c) => c.active !== false).map((c) => (
-                    <option key={c.id} value={c.id}>{c.label}</option>
-                  ))}
-                </select>
-              </Field>
-            ) : (
-              <>
-                <Field label="Libellé de la catégorie">
-                  <input
-                    className={inputCls}
-                    value={catLabel}
-                    onChange={(e) => setCatLabel(e.target.value)}
-                    placeholder="Ex. Assurance vie"
-                  />
-                </Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Nature">
-                    <select className={inputCls} value={catNature} onChange={(e) => setCatNature(e.target.value)}>
-                      <option value="depense">Dépense</option>
-                      <option value="revenu">Revenu</option>
-                    </select>
-                  </Field>
-                  {catNature === "depense" && (
-                    <Field label="Enveloppe budgétaire">
-                      <select className={inputCls} value={catEnv} onChange={(e) => setCatEnv(e.target.value)}>
-                        {ENVELOPPES.filter((x) => x.id !== "exceptionnelles").map((x) => (
-                          <option key={x.id} value={x.id}>{x.label}</option>
-                        ))}
-                      </select>
-                    </Field>
-                  )}
-                </div>
-              </>
-            )}
-            <Field label="Libellé de la sous-catégorie">
-              <input
-                className={inputCls}
-                value={subLabel}
-                onChange={(e) => setSubLabel(e.target.value)}
-                placeholder="Ex. Cotisation annuelle"
-              />
-            </Field>
-            <Field label="Nature de la sous-catégorie">
-              <select className={inputCls} value={subNat} onChange={(e) => setSubNat(e.target.value)}>
-                <option value="auto">Comme la catégorie</option>
-                <option value="depense">Dépense</option>
-                <option value="revenu">Revenu</option>
-              </select>
-            </Field>
-            <CheckRow checked={recurring} onChange={setRecurring} label="Sous-catégorie récurrente 🔁" />
-            <CheckRow checked={incompressible} onChange={setIncompressible} label="Sous-catégorie incompressible 🔒" />
-            {err && <p className="text-xs text-rose-600">{err}</p>}
-            {okMsg && <p className="text-xs text-emerald-600">{okMsg}</p>}
-            <button
-              className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
-              onClick={submit}
-              disabled={!subLabel.trim() || (mode === "nouvelle" ? !catLabel.trim() : !catId)}
-            >
-              Ajouter le couple
-            </button>
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}

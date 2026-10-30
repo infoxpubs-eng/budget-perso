@@ -126,6 +126,21 @@ describe("parseCsv", () => {
 /* ------------------------------------------------------------------ */
 
 describe("rowsToEntries", () => {
+  it("marque les extras one-shot des sous-catégories ponctuelles, pas celles de la vie courante", () => {
+    const csv = [
+      "Date transaction;Date comptabilisation;Libellé opération;Catégorie;Sous-Catégorie;Montant;Pointée;",
+      "02/10/2026;02/10/2026;VIR POUR PARASYSTEM;Logement;Frais exceptionnels (déménagements, frais agences…);-198,00;Oui;",
+      "03/10/2026;03/10/2026;CARTE 03/10 BISTRO;Loisirs;Restaurants, bars, discothèques…;-15,00;Oui;",
+    ].join("\n");
+    const { rows } = parseCsv(csv);
+    const r = rowsToEntries(rows);
+    expect(r.extras).toHaveLength(2);
+    const ponctuel = r.extras.find((e) => e.opLabel.includes("PARASYSTEM"));
+    const courant = r.extras.find((e) => e.opLabel.includes("BISTRO"));
+    expect(ponctuel.oneShot).toBe(true); // frais-exceptionnels est marqué one-shot
+    expect(!courant.oneShot).toBe(true); // dépense de vie courante
+  });
+
   it("route les débits vers des dépenses exceptionnelles, les crédits vers des revenus uniques", () => {
     const { rows } = parseCsv(SAMPLE);
     const r = rowsToEntries(rows);

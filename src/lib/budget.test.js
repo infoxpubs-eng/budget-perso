@@ -430,14 +430,38 @@ describe("monthlyExpenses", () => {
     expect(agg.byEnv.loisirs).toBe(40);
   });
 
-  it("inclut les dépenses exceptionnelles dans l'enveloppe Exceptionnelles", () => {
+  it("range une dépense non planifiée de la vie courante dans l'enveloppe de son couple", () => {
     const state = baseState();
     state.extras.push({ id: "x1", label: "Réparation voiture", amount: 400, day: 18, y: 2026, m: 9, cat: "auto-moto", sub: "entretien" });
     const oct = monthlyExpenses(state, 2026, 9);
     const jan = monthlyExpenses(state, 2026, 0);
-    expect(oct.byEnv.exceptionnelles).toBe(400);
+    const base = monthlyExpenses(baseState(), 2026, 9);
+    expect(oct.byEnv.habituelles - base.byEnv.habituelles).toBe(400); // Auto et Moto → enveloppe habituelles
+    expect(oct.byEnv.exceptionnelles - base.byEnv.exceptionnelles).toBe(0); // plus de fourre-tout systématique
     expect(oct.byCat["auto-moto"]).toBe(400); // la catégorie bancaire reste visible
-    expect(jan.byEnv.exceptionnelles).toBe(0);
+    expect(jan.byEnv.habituelles - monthlyExpenses(baseState(), 2026, 0).byEnv.habituelles).toBe(0);
+  });
+
+  it("garde les dépenses one-shot dans l'enveloppe Exceptionnelles", () => {
+    const state = baseState();
+    // frais-exceptionnels est marqué one-shot dans la nomenclature de référence
+    state.extras.push({ id: "x1", label: "Frais dossier ParaSystem", amount: 198, day: 2, y: 2026, m: 9, cat: "logement", sub: "frais-exceptionnels" });
+    const oct = monthlyExpenses(state, 2026, 9);
+    expect(oct.byEnv.exceptionnelles).toBe(198);
+  });
+
+  it("respecte le marqueur oneShot explicite d'une ligne, hérité ou surchargé", () => {
+    const state = baseState();
+    // ligne sans marqueur explicite : dérivé de la sous-catégorie (one-shot)
+    state.extras.push({ id: "x1", label: "Ponctuel", amount: 100, day: 3, y: 2026, m: 9, cat: "logement", sub: "frais-exceptionnels" });
+    // surcharge explicite : one-shot malgré un couple de vie courante
+    state.extras.push({ id: "x2", label: "Achat unique", amount: 50, day: 4, y: 2026, m: 9, cat: "vie-quotidienne", sub: "alimentation", oneShot: true });
+    // surcharge explicite inverse : vie courante malgré frais-exceptionnels
+    state.extras.push({ id: "x3", label: "Courant", amount: 30, day: 5, y: 2026, m: 9, cat: "logement", sub: "frais-exceptionnels", oneShot: false });
+    const oct = monthlyExpenses(state, 2026, 9);
+    const base = monthlyExpenses(baseState(), 2026, 9);
+    expect(oct.byEnv.exceptionnelles - base.byEnv.exceptionnelles).toBe(150); // x1 (dérivé) + x2 (explicite)
+    expect(oct.byEnv.domestiques - base.byEnv.domestiques).toBe(30); // x3 → enveloppe de Logement
   });
 
   it("sépare l'incompressible du discrétionnaire", () => {
@@ -1113,7 +1137,14 @@ describe("transferts internes ⇄", () => {
     const cat = (st.taxonomie ?? []).find((c) => c.id === "epargne");
     const sub = cat?.subs.find((x) => x.id === "epargne-bancaire");
     expect(!!sub?.transfer).toBe(true);
-    expect(st.taxoFlagsVersion).toBe(2);
+    expect(st.taxoFlagsVersion).toBe(3);
+  });
+
+  it("migrateState re-applique le marqueur one-shot de la nomenclature sur un ancien état", () => {
+    const st = migrateState({ soldeDepart: 0, expenses: [], incomes: [], extras: [], taxoFlagsVersion: 2 });
+    const sub = (st.taxonomie ?? []).find((c) => c.id === "logement")?.subs.find((x) => x.id === "frais-exceptionnels");
+    expect(!!sub?.oneShot).toBe(true);
+    expect(st.taxoFlagsVersion).toBe(3);
   });
 
   it("totaux budgétaires hors transferts, flux d'épargne exposé, solde exact", () => {

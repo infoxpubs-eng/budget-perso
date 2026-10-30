@@ -167,6 +167,35 @@ describe("remainingProvision", () => {
     expect(prov.lines[0].left).toBe(350);
   });
 
+  it("les dépenses one-shot n'alimentent ni l'apprentissage ni le déjà-dépensé", () => {
+    // Habitude de vie courante : 100 €/mois pendant 6 mois complets.
+    const courant = [
+      x(2026, 3, 5, 100), x(2026, 4, 5, 100), x(2026, 5, 5, 100),
+      x(2026, 6, 5, 100), x(2026, 7, 5, 100), x(2026, 8, 5, 100),
+      x(2026, 9, 5, 40),
+    ];
+    // Frais de dossier one-shot (sous-catégorie marquée) quasi chaque mois.
+    const ponctuel = [
+      x(2026, 3, 2, 198, "logement", "frais-exceptionnels", "ParaSystem"),
+      x(2026, 4, 2, 198, "logement", "frais-exceptionnels", "ParaSystem"),
+      x(2026, 5, 2, 198, "logement", "frais-exceptionnels", "ParaSystem"),
+      x(2026, 6, 2, 198, "logement", "frais-exceptionnels", "ParaSystem"),
+      x(2026, 7, 2, 198, "logement", "frais-exceptionnels", "ParaSystem"),
+      x(2026, 8, 2, 198, "logement", "frais-exceptionnels", "ParaSystem"),
+    ];
+    // one-shot explicite sur un couple de vie courante : exclu pareillement.
+    const explicite = [x(2026, 8, 9, 500, "vie-quotidienne", "alimentation", "Achat unique")].map((e) => ({ ...e, oneShot: true }));
+    const extras = [...courant, ...ponctuel, ...explicite];
+    const prov = remainingProvision({ extras, y: 2026, m: 9 });
+    const couples = prov.lines.map((l) => l.cat + "|" + l.sub);
+    expect(couples).toContain("loisirs|restaurants");
+    expect(couples).not.toContain("logement|frais-exceptionnels"); // one-shot dérivé
+    expect(couples).not.toContain("vie-quotidienne|alimentation"); // one-shot explicite
+    const restos = prov.lines.find((l) => l.sub === "restaurants");
+    expect(restos.tendency).toBe(100); // les 500 € one-shot ne polluent pas
+    expect(restos.spent).toBe(40); // idem pour le déjà-dépensé
+  });
+
   it("cold start (aucun relevé) → provision nulle", () => {
     const prov = remainingProvision({ extras: [], expenses: [], y: 2026, m: 9 });
     expect(prov).toEqual({ lines: [], total: 0 });

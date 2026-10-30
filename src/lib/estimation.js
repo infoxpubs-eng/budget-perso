@@ -29,7 +29,7 @@
  * la console 🛠️ Admin.
  */
 
-import { TAXONOMIE, subTransfer } from "./taxonomie.js";
+import { TAXONOMIE, subTransfer, extraOneShot } from "./taxonomie.js";
 
 /** Fenêtre d'apprentissage par défaut (mois complets, zéros inclus). */
 export const TENDENCY_WINDOW = 6;
@@ -187,10 +187,11 @@ export function remainingProvision({ extras = [], expenses = [], y, m, settings 
   if (!Number.isFinite(y) || !Number.isFinite(m)) return { lines: [], total: 0 };
   const cfg = normEstimation(settings);
   // Les couples marqués « transfert interne ⇄ » (virements d'épargne) ne
-  // sont pas des habitudes de dépense : exclus de l'apprentissage comme
-  // du déjà-dépensé.
+  // sont pas des habitudes de dépense : exclus de l'apprentissage comme du
+  // déjà-dépensé. Les dépenses one-shot (ponctuelles, durée limitée) ne
+  // sont pas des habitudes non plus : exclues pareillement.
   const budgetExtras = extras.filter(
-    (x) => x && !subTransfer(x.cat ?? "?", x.sub ?? "?", taxo)
+    (x) => x && !subTransfer(x.cat ?? "?", x.sub ?? "?", taxo) && !extraOneShot(x, taxo)
   );
   const tendencies = coupleTendencies(budgetExtras, { y, m }, cfg);
   const planned = new Set();

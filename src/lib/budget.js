@@ -18,6 +18,7 @@ import {
   TAXONOMIE,
   defaultTaxonomie,
   envelopeOf,
+  extraOneShot,
   subIncompressible,
   subRecurring,
   subTransfer,
@@ -671,9 +672,10 @@ export function simulate(state, startY, startM, opening = state.soldeDepart) {
  * Total des dépenses planifiées du mois (indexé 0), toutes natures confondues.
  *
  * - `byEnv` / `incByEnv` : totaux par enveloppe budgétaire (les 6 historiques).
- *   Les dépenses récurrentes sont rangées via la nomenclature bancaire
- *   (voir taxonomie.js → envelopeOf), les dépenses exceptionnelles comptent
- *   toujours dans l'enveloppe « Exceptionnelles ».
+ *   Les dépenses récurrentes et les dépenses non planifiées de la vie
+ *   courante sont rangées via la nomenclature bancaire (voir
+ *   taxonomie.js → envelopeOf) ; seules les dépenses one-shot comptent dans
+ *   l'enveloppe « Exceptionnelles ».
  * - `byCat` / `incByCat` : totaux par grande catégorie bancaire, toutes
  *   enveloppes confondues (utile pour le détail par catégorie).
  *
@@ -729,8 +731,11 @@ export function monthlyExpenses(state, y, m) {
   }
   for (const x of state.extras ?? []) {
     if (x.y === y && x.m === m) {
+      // Dépense one-shot → enveloppe « Exceptionnelles ». Dépense non
+      // planifiée de la vie courante → enveloppe de son couple bancaire :
+      // la vue par enveloppe reflète le réel, pas seulement le planifié.
       add(
-        "exceptionnelles",
+        extraOneShot(x, taxo) ? "exceptionnelles" : envelopeOf(x.cat, x.sub, taxo),
         x.cat ?? "logement",
         x.amount,
         !!x.incompressible || subIncompressible(x.cat, x.sub, taxo),

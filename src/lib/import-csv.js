@@ -35,7 +35,7 @@
  * Module sans dépendance React : testable isolément (voir import-csv.test.js).
  */
 
-import { TAXONOMIE, catByLabel, subByLabel, subByOperation, slugify, subIncompressible, subRecurring, subTransfer, addCategory, addSubcategory, taxSub, normalizeLabel } from "./taxonomie.js";
+import { TAXONOMIE, catByLabel, subByLabel, subByOperation, slugify, subIncompressible, subRecurring, subTransfer, addCategory, addSubcategory, taxSub, normalizeLabel, subOneShot } from "./taxonomie.js";
 
 /**
  * Libellés typiques des virements d'épargne (Livret A, CSL, PEL…) : une
@@ -523,6 +523,10 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
         cat: r.cat,
         sub: r.sub,
         opLabel: r.opLabel,
+        // Dépense ponctuelle (« one-shot ») si la sous-catégorie l'indique
+        // (ex. frais exceptionnels) : ces lignes restent dans l'enveloppe
+        // « Exceptionnelles » et n'alimentent pas les habitudes apprises.
+        oneShot: subOneShot(r.cat, r.sub, taxo) || undefined,
       });
       depensesTotal += -r.amount;
     } else {

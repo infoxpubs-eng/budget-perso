@@ -5,6 +5,19 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.0] — 2026-10-30
+
+### Ajouté
+
+- **Dépenses one-shot** : distinction, dans les dépenses non planifiées, entre la vie courante (courses, restaurants, taxis… dont les habitudes sont apprises) et les dépenses ponctuelles à durée limitée (frais de dossier, échéances de crédit — ex. ParaSystem, Cofidis). Un marqueur « one-shot » existe au niveau de la sous-catégorie (« Frais exceptionnels » par défaut, réglable dans 🛍️ Admin comme 🔁/🔒/⇄) et au niveau de chaque ligne (bouton « one-shot » dans la liste des dépenses non planifiées, case à cocher du formulaire).
+- Les dépenses one-shot restent dans l'enveloppe « Exceptionnelles » et sont **exclues de l'apprentissage des habitudes** comme du déjà-dépensé.
+
+### Modifié
+
+- **Les dépenses non planifiées de la vie courante comptent désormais dans l'enveloppe de leur catégorie bancaire** (Restaurants → Loisirs, Courses → Vie quotidienne…) au lieu du fourre-tout « Exceptionnelles » : la vue par enveloppe reflète le réel, pas seulement le planifié.
+- Refonte du vocabulaire de l'interface : « dépense exceptionnelle » devient « dépense non planifiée » (l'enveloppe « Exceptionnelles » ne garde que les one-shot).
+- Migration transparente : les anciens états reçoivent le marqueur one-shot par fusion des défauts de la nomenclature (version des marqueurs 3) ; une ligne sans marqueur explicite l'hérite de sa sous-catégorie.
+
 ## [0.29.1] — 2026-10-10
 
 ### Corrigé
