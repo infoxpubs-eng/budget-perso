@@ -221,6 +221,21 @@ function SimpleTooltip({ active, payload, label }) {
   );
 }
 
+function AvantSalaireTooltip({ active, payload, label }) {
+  if (!active || !payload || !payload.length || payload[0].value == null) return null;
+  const v = payload[0].value;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg text-xs">
+      <div className="font-semibold text-slate-600">{label}</div>
+      <div className={"mt-1 font-bold " + (v < 0 ? "text-rose-600" : "text-slate-900")}>
+        {v < 0 ? "Découvert avant salaire : " : "Solde avant salaire : "}
+        {fmt(Math.abs(v))}
+      </div>
+      {payload[0].payload.reel && <div className="mt-0.5 text-slate-400">mois chargé — flux réels</div>}
+    </div>
+  );
+}
+
 /* ============================== App ============================== */
 
 export default function App() {
@@ -366,6 +381,29 @@ export default function App() {
       ? sim.start + sim.realSoFar
       : sim.daily[todayDay].solde;
   const isCurrentMonth = sim.y === now.getFullYear() && sim.m === now.getMonth();
+
+  // ----- Solde « avant salaire » : balance à la veille du jour de paie -----
+  // Indicateur de tenue du mois : positif → le mois tient sur ses recettes, le
+  // salaire arrive en boni ; négatif → le salaire comble un découvert (les
+  // dépenses ont dépassé les recettes depuis l'ouverture).
+  const salaryDayOf = (y, m) => {
+    if (state.incomes.some((i) => i.mode === "salaire")) return salaryPayDay(y, m);
+    const fixe = state.incomes.find((i) => i.mode !== "unique" && i.day);
+    return fixe ? fixe.day : null;
+  };
+  const beforeSalaryOf = (mo) => {
+    const d = salaryDayOf(mo.y, mo.m);
+    if (!d || !mo.daily) return null;
+    return mo.daily[Math.max(0, Math.min(d - 1, mo.daily.length - 1))].solde;
+  };
+  const salJour = salaryDayOf(sim.y, sim.m);
+  const avantSalaire = beforeSalaryOf(sim);
+  // Historique complet : solde avant salaire, mois chargé (réel) ou simulé.
+  const avantSalaireData = monthsAll.map((mo) => ({
+    label: mo.label,
+    avant: beforeSalaryOf(mo),
+    reel: !!mo.hasData,
+  }));
 
   const setSolde = (n) => setState((s) => ({ ...s, soldeDepart: n }));
 
@@ -710,13 +748,15 @@ export default function App() {
                 }
               />
               <Kpi
-                label="Reste à dépenser"
-                value={fmt(Math.max(0, sim.end - prov.total))}
-                tone={sim.end - prov.total > 0 ? "good" : "bad"}
+                label="Solde avant salaire"
+                value={avantSalaire === null ? "—" : fmt(avantSalaire)}
+                tone={avantSalaire === null ? undefined : avantSalaire >= 0 ? "good" : "bad"}
                 hint={
-                  sim.end - prov.total >= 0
-                    ? "Sans finir à découvert en fin de mois — échéances planifiées et habitudes (prorata des jours restants) décomptées"
-                    : "Budget épuisé — découvert probable de " + fmt(Math.abs(sim.end - prov.total)) + " €"
+                  avantSalaire === null
+                    ? "Aucun salaire ni revenu à jour fixe planifié"
+                    : avantSalaire >= 0
+                      ? "Veille du salaire du " + salJour + " " + MONTHS[sim.m].toLowerCase() + " — le mois tient sur ses recettes, le salaire arrive en boni"
+                      : "Découvert avant même le salaire du " + salJour + " " + MONTHS[sim.m].toLowerCase() + " — les dépenses ont dépassé les recettes"
                 }
               />
             </div>
@@ -882,6 +922,42 @@ export default function App() {
                         dot={false}
                       />
                     </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </Card>
+
+              <Card>
+                <h2 className="mb-1 font-semibold">Solde avant salaire (historique → projection)</h2>
+                <p className="mb-3 text-xs text-slate-500">
+                  Balance du compte à la veille du jour de paie, mois après mois. Barre pleine = mois chargé
+                  (flux réels), barre estompée = simulation ; rouge = le salaire tombe sur un découvert.
+                  La tendance monte quand les économies portent leurs fruits.
+                </p>
+                <div className="h-60">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={avantSalaireData} margin={{ top: 10, right: 16, bottom: 4, left: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} tickFormatter={(v) => v.split(" ")[0].slice(0, 4)} />
+                      <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => Math.round(v / 100) / 10 + "k€"} width={48} />
+                      <Tooltip content={<AvantSalaireTooltip />} />
+                      <ReferenceLine y={0} stroke="#f43f5e" strokeDasharray="4 4" />
+                      <Bar dataKey="avant" radius={[3, 3, 0, 0]}>
+                        {avantSalaireData.map((d, i) => (
+                          <Cell
+                            key={i}
+                            fill={
+                              d.avant == null
+                                ? "#e2e8f0"
+                                : d.avant < 0
+                                  ? "#f43f5e"
+                                  : d.reel
+                                    ? "#6366f1"
+                                    : "#a5b4fc"
+                            }
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
                   </ResponsiveContainer>
                 </div>
               </Card>

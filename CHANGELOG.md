@@ -5,6 +5,16 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.8] — 2026-10-30
+
+### Modifié
+
+- **KPI « Solde avant salaire »** remplace « Reste à dépenser » dans l'Aperçu : solde du compte à la veille du jour de paie du mois affiché (jour de paie du salaire, sinon jour du premier revenu à échéance fixe). Positif = le mois tient sur ses recettes, le salaire arrive en boni ; négatif = le salaire comble un découvert, les dépenses ont dépassé les recettes depuis l'ouverture du mois.
+
+### Ajouté
+
+- **Graphique « Solde avant salaire (historique → projection) »** : balance avant salaire de chaque mois (historique chargé, fenêtre simulée, relevés au-delà), barres pleines pour les mois réels, estompées pour les simulations, rouges en cas de découvert — la tendance mois par mois montre si les économies réalisées sont efficaces.
+
 ## [0.30.7] — 2026-10-30
 
 ### Modifié
