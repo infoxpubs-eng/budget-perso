@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.6] — 2026-10-30
+
+### Corrigé
+
+- **Le « Solde fin de mois probable » est maintenant un vrai atterrissage** : la provision d'habitudes retranchée est au **prorata des jours restants** du mois courant, au rythme réel du mois (jamais sous la tendance moyenne ; un mois plus dépensier que d'habitude conserve son rythme observé ; dernier jour du mois → provision nulle). Auparavant, l'enveloppe mensuelle entière (`tendance − dépensé`) était retranchée quelle que soit la date : le 30 du mois, le KPI supposait encore ~1 500 € de dépenses d'habitudes possibles d'ici le lendemain. Les mois futurs ou passés conservent l'enveloppe complète (référence du modèle).
+
 ## [0.30.5] — 2026-10-30
 
 ### Modifié

@@ -67,6 +67,9 @@ export function normEstimation(settings = {}) {
 const monthIdx = (y, m) => y * 12 + m;
 const idxMonth = (i) => ({ y: Math.floor(i / 12), m: i % 12 });
 
+/** Nombre de jours d'un mois (m 0-indexé) — local pour éviter un cycle d'import. */
+const daysInMonthOf = (y, m) => new Date(y, m + 1, 0).getDate();
+
 /**
  * Médiane d'un tableau de nombres (0 si vide) — les deux valeurs du
  * milieu sont moyennées si le nombre d'éléments est pair.
@@ -172,7 +175,9 @@ export function coupleTendencies(extras = [], upto, settings = {}) {
 
 /**
  * Provision restante du mois (y, m) pour les habitudes non planifiées :
- * par couple, `max(0, tendance − dépensé ce mois-ci)`.
+ * par couple, `max(0, tendance − dépensé ce mois-ci)` — ou, pour le mois
+ * courant (`today` = jour du mois), le prorata des jours restants au rythme
+ * réel du mois (voir le commentaire du corps).
  *
  * - Les couples portés par une écriture planifiée (quelle que soit sa
  *   fréquence) sont exclus : pas de double comptage avec la simulation.
@@ -180,10 +185,11 @@ export function coupleTendencies(extras = [], upto, settings = {}) {
  * - Les revenus ne sont jamais estimés statistiquement.
  *
  * @param {{extras?:Array, expenses?:Array, y:number, m:number,
- *          settings?:{window?:number,presenceMin?:number,stat?:"mediane"|"moyenne"}}} args
+ *          settings?:{window?:number,presenceMin?:number,stat?:"mediane"|"moyenne"},
+ *          today?:number|null}} args
  * @returns {{lines:Array<{cat:string,sub:string,tendency:number,spent:number,left:number}>, total:number}}
  */
-export function remainingProvision({ extras = [], expenses = [], y, m, settings = {}, taxo = TAXONOMIE } = {}) {
+export function remainingProvision({ extras = [], expenses = [], y, m, settings = {}, taxo = TAXONOMIE, today = null } = {}) {
   if (!Number.isFinite(y) || !Number.isFinite(m)) return { lines: [], total: 0 };
   const cfg = normEstimation(settings);
   // Les couples marqués « transfert interne ⇄ » (virements d'épargne) ne
@@ -205,13 +211,39 @@ export function remainingProvision({ extras = [], expenses = [], y, m, settings 
   }
   const lines = [];
   let total = 0;
-  for (const t of tendencies) {
-    if (t.tendency <= 0) continue;
-    const k = t.cat + "|" + t.sub;
+  // Prorata des jours restants (mois courant uniquement, `today` = jour du
+  // mois 1-31). L'enveloppe `tendance − dépensé` est une réserve MENSUELLE :
+  // la soustraire entière le 30 du mois supposerait ~1 500 € de courses
+  // possibles d'ici demain. Au prorata, la provision restante suit le
+  // rythme réel du mois : le rythme par jour ne descend jamais sous la
+  // tendance moyenne (tendance / jours du mois), et un mois déjà plus
+  // dépensier que d'habitude conserve son rythme observé (dépensé / jours
+  // écoulés). Sans `today` (mois futur ou passé), l'enveloppe complète est
+  // conservée — pour un mois pas commencé, la provision pleine est juste ;
+  // pour un mois écoulé, elle mesure ce que le modèle réservait.
+  const dim = Number.isFinite(y) && Number.isFinite(m) ? daysInMonthOf(y, m) : 0;
+  const t = Number(today);
+  const prorata = Number.isFinite(t) && t >= 1 && t <= dim;
+  const restants = prorata ? dim - t : dim;
+  for (const t2 of tendencies) {
+    if (t2.tendency <= 0) continue;
+    const k = t2.cat + "|" + t2.sub;
     if (planned.has(k)) continue;
     const spent = spentBy.get(k) ?? 0;
-    const left = Math.max(0, t.tendency - spent);
-    lines.push({ cat: t.cat, sub: t.sub, tendency: t.tendency, spent, left });
+    let left;
+    if (prorata) {
+      if (restants <= 0) {
+        left = 0; // mois terminé : plus rien à provisionner
+      } else {
+        const paceTendency = t2.tendency / dim;
+        const paceSpent = t > 0 ? spent / t : 0;
+        const pace = Math.max(paceTendency, paceSpent);
+        left = Math.max(0, pace * restants);
+      }
+    } else {
+      left = Math.max(0, t2.tendency - spent);
+    }
+    lines.push({ cat: t2.cat, sub: t2.sub, tendency: t2.tendency, spent, left });
     total += left;
   }
   return { lines, total };

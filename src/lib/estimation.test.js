@@ -201,6 +201,40 @@ describe("remainingProvision", () => {
     expect(prov).toEqual({ lines: [], total: 0 });
   });
 
+  it("mois courant : provision au prorata des jours restants (rythme de la tendance)", () => {
+    // Octobre 2026 : 31 jours, tendance 350 €. Aujourdhui le 15 :
+    // rythme = 350/31 €/jour, restants 16 jours → 350 × 16/31.
+    const prov = remainingProvision({ extras: sixMonths, expenses: [], y: 2026, m: 9, today: 15 });
+    expect(prov.lines).toHaveLength(1);
+    expect(prov.lines[0].left).toBeCloseTo(350 * 16 / 31, 2);
+    expect(prov.total).toBeCloseTo(350 * 16 / 31, 2);
+  });
+
+  it("mois courant, mois plus économe que la tendance : le rythme ne descend pas sous la tendance", () => {
+    // 100 € dépensés au jour 15 → rythme réel 6,67 €/j < 11,29 €/j : la
+    // provision garde le rythme de la tendance (180,65 €), pas le réel.
+    const prov = remainingProvision({ extras: [...sixMonths, x(2026, 9, 5, 100)], expenses: [], y: 2026, m: 9, today: 15 });
+    expect(prov.lines[0].left).toBeCloseTo(350 * 16 / 31, 2);
+  });
+
+  it("mois courant plus dépensier que la tendance : le rythme observé est conservé", () => {
+    // 200 € dépensés en 10 jours → rythme réel 20 €/j > 11,29 €/j :
+    // restants 21 jours → provision 420 € (le mois garde son allure).
+    const prov = remainingProvision({ extras: [...sixMonths, x(2026, 9, 3, 200)], expenses: [], y: 2026, m: 9, today: 10 });
+    expect(prov.lines[0].left).toBeCloseTo(420, 2);
+  });
+
+  it("dernier jour du mois : plus rien à provisionner", () => {
+    const prov = remainingProvision({ extras: sixMonths, expenses: [], y: 2026, m: 9, today: 31 });
+    expect(prov.lines[0].left).toBe(0);
+    expect(prov.total).toBe(0);
+  });
+
+  it("sans `today` (mois futur ou passé) : enveloppe complète inchangée", () => {
+    const prov = remainingProvision({ extras: [...sixMonths, x(2026, 9, 1, 100)], expenses: [], y: 2026, m: 9 });
+    expect(prov.lines[0].left).toBe(250); // max(0, 350 − 100), comportement historique
+  });
+
   it("paramètres du modèle exposés et cohérents", () => {
     expect(TENDENCY_WINDOW).toBe(6);
     expect(PRESENCE_MIN).toBe(0.5);

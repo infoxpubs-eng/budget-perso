@@ -537,9 +537,13 @@ export default function App() {
   // Réglages du modèle (fenêtre, seuil de présence, statistique) : persistés
   // avec l'état, éditables dans la console 🛠️ Admin.
   const est = state.estimation ?? DEFAULT_ESTIMATION;
+  // Prorata du mois courant : la provision restante suit les jours restants,
+  // pas l'enveloppe mensuelle entière (sinon le « solde probable » du 30 du
+  // mois retrancherait ~1 500 € d'habitudes comme s'il restait un mois entier.
+  const todayDay = isCurrentMonth ? now.getDate() : null;
   const prov = useMemo(
-    () => remainingProvision({ extras: state.extras, expenses: state.expenses, y: sim.y, m: sim.m, settings: est, taxo: state.taxonomie }),
-    [state.extras, state.expenses, state.estimation, sim.y, sim.m]
+    () => remainingProvision({ extras: state.extras, expenses: state.expenses, y: sim.y, m: sim.m, settings: est, taxo: state.taxonomie, today: todayDay }),
+    [state.extras, state.expenses, state.estimation, sim.y, sim.m, todayDay]
   );
   const recYear = useMemo(
     () => sims.map((s) => ({ label: s.label, min: s.min, minDay: s.minDay, end: s.end, ...recurringMonthTotals(state, s.y, s.m) })),
