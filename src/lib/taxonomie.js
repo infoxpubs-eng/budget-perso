@@ -110,7 +110,7 @@ export const TAXONOMIE = [
   {
     id: "epargne", label: "Dépenses d'épargne", nature: "depense", env: "domestiques",
     subs: [
-      { id: "epargne-bancaire", label: "Épargne bancaire (Livret A, PEL…)" , recurring: true, transfer: true },
+      { id: "epargne-bancaire", label: "Épargne bancaire (Livret A, PEL…)" , transfer: true },
     ],
   },
   {
@@ -319,7 +319,7 @@ export function subByOperation(catId, opLabel, taxo = TAXONOMIE) {
  * la version — les choix explicitement faits ensuite dans la console
  * d'administration ne sont plus écrasés.
  */
-export const TAXO_FLAGS_VERSION = 3;
+export const TAXO_FLAGS_VERSION = 4;
 
 /**
  * Fusionne les marqueurs 🔁/🔒 des sous-catégories de référence sur une

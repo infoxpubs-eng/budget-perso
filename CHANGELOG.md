@@ -5,6 +5,13 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.2] — 2026-10-30
+
+### Modifié
+
+- **L'épargne bancaire n'est plus récurrente** : la sous-catégorie « Épargne bancaire (Livret A, PEL…) » perd son marqueur 🔁 (elle reste un transfert interne ⇄). Les mouvements d'épargne — versements ponctuels ou comblements de découvert — ne sont plus planifiés ni appris comme habitudes : ils n'apparaissent que lorsqu'ils ont réellement lieu.
+- **Migration v4** : les écritures planifiées « Épargne bancaire » éventuelles (créées par l'import des relevés quand le couple était 🔁) sont converties en dépenses non planifiées datées, occurrence par occurrence — mêmes dates, mêmes montants, aucun solde ne change.
+
 ## [0.30.1] — 2026-10-30
 
 ### Corrigé

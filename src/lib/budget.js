@@ -176,6 +176,46 @@ export function migrateState(raw) {
   // version est enregistrée pour ne plus écraser les choix de l'utilisateur.
   if (s.taxoFlagsVersion !== TAXO_FLAGS_VERSION) {
     s.taxonomie = applyDefaultFlags(s.taxonomie);
+    // v4 : « Épargne bancaire » (Livret A, PEL…) n'est plus marquée
+    // récurrente 🔁. Les mouvements d'épargne sont des transferts internes ⇄
+    // décidés au cas par cas : jamais planifiés, jamais appris comme
+    // habitude. La fusion par défaut ne fait qu'ajouter des marqueurs, il
+    // faut donc retirer explicitement le 🔁 posé par les versions
+    // antérieures, et convertir les écritures planifiées éventuelles
+    // (créées par l'import des relevés tant que le couple était 🔁) en
+    // dépenses non planifiées datées, occurrence par occurrence — même
+    // argent, même mois, même jour : rien n'est perdu ni dupliqué, et le
+    // rapprochement au réimport (date + montant) reste idempotent.
+    if ((raw?.taxoFlagsVersion ?? 0) < 4) {
+      s.taxonomie = s.taxonomie.map((c) =>
+        c.id !== "epargne"
+          ? c
+          : {
+              ...c,
+              subs: c.subs.map((x) =>
+                x.id === "epargne-bancaire" ? { ...x, recurring: false } : x
+              ),
+            }
+      );
+      const converted = [];
+      s.expenses = (s.expenses ?? []).filter((e) => {
+        if (e.sub !== "epargne-bancaire") return true;
+        for (const h of e.history ?? []) {
+          converted.push({
+            id: `${e.id}-epargne-${h.y}-${h.m}-${h.day}`,
+            label: e.label,
+            amount: Math.abs(h.amount),
+            day: h.day,
+            y: h.y,
+            m: h.m,
+            cat: e.cat,
+            sub: e.sub,
+          });
+        }
+        return false;
+      });
+      if (converted.length) s.extras = [...(s.extras ?? []), ...converted];
+    }
     s.taxoFlagsVersion = TAXO_FLAGS_VERSION;
   }
   // Réglages du modèle prédictif (fenêtre, seuil de présence, statistique) :

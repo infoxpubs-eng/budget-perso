@@ -1129,7 +1129,7 @@ describe("transferts internes ⇄", () => {
     expect(t.subTransfer("epargne", "epargne-bancaire", t.TAXONOMIE)).toBe(true);
     expect(t.subTransfer("revenus-epargne", "autres", t.TAXONOMIE)).toBe(true);
     expect(t.subTransfer("loisirs", "restaurants", t.TAXONOMIE)).toBe(false);
-    expect(t.TAXO_FLAGS_VERSION).toBe(3);
+    expect(t.TAXO_FLAGS_VERSION).toBe(4);
   });
 
   it("migrateState re-applique les marqueurs ⇄ sur un ancien état", () => {
@@ -1137,14 +1137,55 @@ describe("transferts internes ⇄", () => {
     const cat = (st.taxonomie ?? []).find((c) => c.id === "epargne");
     const sub = cat?.subs.find((x) => x.id === "epargne-bancaire");
     expect(!!sub?.transfer).toBe(true);
-    expect(st.taxoFlagsVersion).toBe(3);
+    expect(st.taxoFlagsVersion).toBe(4);
   });
 
   it("migrateState re-applique le marqueur one-shot de la nomenclature sur un ancien état", () => {
     const st = migrateState({ soldeDepart: 0, expenses: [], incomes: [], extras: [], taxoFlagsVersion: 2 });
     const sub = (st.taxonomie ?? []).find((c) => c.id === "logement")?.subs.find((x) => x.id === "frais-exceptionnels");
     expect(!!sub?.oneShot).toBe(true);
-    expect(st.taxoFlagsVersion).toBe(3);
+    expect(st.taxoFlagsVersion).toBe(4);
+  });
+
+  it("v4 : l'épargne bancaire n'est plus récurrente et les séries planifiées deviennent des extras datés", () => {
+    const st = migrateState({
+      soldeDepart: 0,
+      expenses: [
+        {
+          id: "e1",
+          label: "Livret A",
+          amount: 2200,
+          day: 26,
+          cat: "epargne",
+          sub: "epargne-bancaire",
+          freq: "mensuelle",
+          history: [
+            { y: 2026, m: 6, day: 26, amount: 2200 },
+            { y: 2026, m: 9, day: 26, amount: 3000 },
+          ],
+        },
+      ],
+      incomes: [],
+      extras: [],
+      taxoFlagsVersion: 3,
+    });
+    // Le marqueur 🔁 est retiré, le ⇄ conservé
+    const sub = (st.taxonomie ?? []).find((c) => c.id === "epargne")?.subs.find((x) => x.id === "epargne-bancaire");
+    expect(!!sub?.recurring).toBe(false);
+    expect(!!sub?.transfer).toBe(true);
+    // La série planifiée disparaît…
+    expect(st.expenses.some((e) => e.sub === "epargne-bancaire")).toBe(false);
+    // …remplacée par une dépense non planifiée par occurrence, à l'identique
+    const conv = st.extras.filter((x) => x.sub === "epargne-bancaire");
+    expect(conv).toHaveLength(2);
+    expect(conv[0]).toEqual({ id: "e1-epargne-2026-6-26", label: "Livret A", amount: 2200, day: 26, y: 2026, m: 6, cat: "epargne", sub: "epargne-bancaire" });
+    expect(conv[1].amount).toBe(3000);
+    expect(conv[1].m).toBe(9);
+    // Le virement reste un transfert interne : hors budget, dans le flux d'épargne
+    const sim = monthSim(st, 2026, 6, 1000);
+    expect(sim.totalOut).toBe(0);
+    expect(sim.transferOut).toBe(2200);
+    expect(sim.fluxEpargne).toBe(2200);
   });
 
   it("totaux budgétaires hors transferts, flux d'épargne exposé, solde exact", () => {
