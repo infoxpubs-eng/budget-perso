@@ -5,6 +5,13 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.1] — 2026-10-30
+
+### Corrigé
+
+- **App.jsx tronqué** lors du push v0.30.0 (fichier coupé en plein JSX) : le build GitHub Pages échouait. Fichier complet restauré.
+- Test « couples d'épargne bancaire » : version de nomenclature attendue mise à jour (TAXO_FLAGS_VERSION 3).
+
 ## [0.30.0] — 2026-10-30
 
 ### Ajouté

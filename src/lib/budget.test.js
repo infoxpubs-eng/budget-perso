@@ -1129,7 +1129,7 @@ describe("transferts internes ⇄", () => {
     expect(t.subTransfer("epargne", "epargne-bancaire", t.TAXONOMIE)).toBe(true);
     expect(t.subTransfer("revenus-epargne", "autres", t.TAXONOMIE)).toBe(true);
     expect(t.subTransfer("loisirs", "restaurants", t.TAXONOMIE)).toBe(false);
-    expect(t.TAXO_FLAGS_VERSION).toBe(2);
+    expect(t.TAXO_FLAGS_VERSION).toBe(3);
   });
 
   it("migrateState re-applique les marqueurs ⇄ sur un ancien état", () => {
