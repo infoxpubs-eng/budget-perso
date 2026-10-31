@@ -18,6 +18,7 @@ import { v4 as uuid } from "uuid";
 import {
   ENVELOPPES,
   MONTHS,
+  MONTHS_SHORT,
   daysInMonth,
   fmt,
   monthLabel,
@@ -884,7 +885,7 @@ export default function App() {
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={yearData} margin={{ top: 10, right: 16, bottom: 4, left: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} tickFormatter={(v) => v.split(" ")[0].slice(0, 4)} />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} tickFormatter={(v) => MONTHS_SHORT[MONTHS.indexOf(v.split(" ")[0])] ?? v.split(" ")[0]} />
                       <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => Math.round(v / 100) / 10 + "k€"} width={48} />
                       <Tooltip content={<SimpleTooltip />} />
                       <ReferenceLine y={0} stroke="#f43f5e" strokeDasharray="4 4" />
@@ -927,7 +928,7 @@ export default function App() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={avantSalaireData} margin={{ top: 10, right: 16, bottom: 4, left: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} tickFormatter={(v) => v.split(" ")[0].slice(0, 4)} />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} tickFormatter={(v) => MONTHS_SHORT[MONTHS.indexOf(v.split(" ")[0])] ?? v.split(" ")[0]} />
                       <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => Math.round(v / 100) / 10 + "k€"} width={48} />
                       <Tooltip content={<AvantSalaireTooltip />} />
                       <ReferenceLine y={0} stroke="#f43f5e" strokeDasharray="4 4" />

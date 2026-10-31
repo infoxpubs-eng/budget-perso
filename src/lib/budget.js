@@ -46,6 +46,16 @@ export const MONTHS = [
   "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
 ];
 
+/**
+ * Abréviations de mois en 3 caractères, alignées sur MONTHS — pour les axes
+ * de graphiques compacts. « Jun »/« Jul » distinguent juin et juillet, que la
+ * troncature à 3 lettres confondrait sinon (« Jui »).
+ */
+export const MONTHS_SHORT = [
+  "Jan", "Fév", "Mar", "Avr", "Mai", "Jun",
+  "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc",
+];
+
 const eur = new Intl.NumberFormat("fr-FR", {
   style: "currency",
   currency: "EUR",

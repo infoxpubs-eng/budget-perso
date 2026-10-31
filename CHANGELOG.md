@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.12] — 2026-10-31
+
+### Modifié
+
+- **Axe des mois harmonisé en abréviations de 3 caractères** : les graphiques « Solde prévisionnel fin de mois (12 mois) » et « Solde avant salaire (historique + mois en cours et suivant) » tronquaient les noms de mois à 4 lettres de façon incohérente (« Octo », « Novi », « Sept », « Déce » mais « Mars », « Août » entiers). Nouvelle constante `MONTHS_SHORT` (« Jan », « Fév »… « Jun », « Jul » pour distinguer juin et juillet) utilisée par les deux axes, avec tests de garde.
+
 ## [0.30.11] — 2026-10-31
 
 ### Supprimé

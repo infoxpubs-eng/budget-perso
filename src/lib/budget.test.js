@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   ENVELOPPES,
   LEGACY_CATS,
+  MONTHS,
+  MONTHS_SHORT,
   daysInMonth,
   monthLabel,
   freqInMonth,
@@ -1410,5 +1412,27 @@ describe("savingsFlowHistory — trajectoire cumulée de l'épargne", () => {
 
   it("aucun mois chargé → historique vide", () => {
     expect(savingsFlowHistory({ expenses: [], incomes: [], extras: [] })).toEqual([]);
+  });
+});
+
+describe("MONTHS_SHORT — abréviations d'axe en 3 caractères", () => {
+  it("12 abréviations de 3 caractères, toutes distinctes", () => {
+    expect(MONTHS_SHORT).toHaveLength(12);
+    for (const s of MONTHS_SHORT) expect(s).toHaveLength(3);
+    expect(new Set(MONTHS_SHORT).size).toBe(12);
+  });
+
+  it("chaque mois a une abréviation reconnaissable (initiale du mois complet)", () => {
+    MONTHS.forEach((m, i) => {
+      expect(m.startsWith(MONTHS_SHORT[i][0])).toBe(true);
+    });
+  });
+
+  it("mapping label de mois → abréviation utilisé par les axes", () => {
+    for (let i = 0; i < 12; i++) {
+      const label = monthLabel(2026, i); // ex. « Octobre 2026 »
+      const short = MONTHS_SHORT[MONTHS.indexOf(label.split(" ")[0])] ?? label.split(" ")[0];
+      expect(short).toHaveLength(3);
+    }
   });
 });
