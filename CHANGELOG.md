@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.31.1] — 2026-10-31
+
+### Corrigé
+
+- **Remboursements dupliqués au réimport d'un relevé déjà intégré par une version antérieure** : un crédit sur un couple de dépense importé avant la v0.31.0 existait comme REVENU unique (montant positif) ; le réimport du même relevé sous v0.31.0 ne le reconnaissait pas (registre à clés signées) et créait un remboursement en double — le crédit était alors compté DEUX fois (une fois en revenu, une fois en dépense en moins), faussant les totaux de revenus et de dépenses du mois, le solde enchaîné et l'apprentissage des habitudes. Double correctif : le registre anti-doublons reconnaît désormais aussi la forme « héritage » (ancien revenu stocké en montant positif) ; et la migration d'état convertit automatiquement les anciens revenus uniques portés par des couples de dépense en remboursements ↩, en absorbant les doublons éventuels créés entre-temps. L'état se répare tout seul au rechargement de la page : chaque crédit ne compte plus qu'une fois.
+
 ## [0.31.0] — 2026-10-31
 
 ### Ajouté

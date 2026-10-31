@@ -235,6 +235,46 @@ describe("migrateState", () => {
     const s2 = migrateState({ soldeDepart: 0, backup: { auto: false, lastAt: "2026-10-31T08:00:00.000Z" } });
     expect(s2.backup).toEqual({ auto: false, lastAt: "2026-10-31T08:00:00.000Z" });
   });
+
+  it("v0.31.1 : convertit les anciens revenus uniques sur couples de dépense en remboursements", () => {
+    const s = migrateState({
+      soldeDepart: 0,
+      incomes: [
+        { id: "i1", label: "Remboursement courses", amount: 120.87, mode: "unique", day: 21, y: 2026, m: 9, cat: "vie-quotidienne", sub: "alimentation" },
+        { id: "i2", label: "Placement", amount: 1800, mode: "unique", day: 24, y: 2026, m: 8, cat: "revenus-epargne", sub: "placements" },
+        { id: "i3", label: "Virement reçu", amount: 5, mode: "unique", day: 20, y: 2026, m: 9, cat: "a-classer", sub: "cfc-services" },
+        { id: "i4", label: "Aide", amount: 180, mode: "fixe" },
+      ],
+      extras: [],
+    });
+    // Seul le revenu unique sur couple de dépense est converti en ↩.
+    expect(s.incomes.map((i) => i.id)).toEqual(["i2", "i3", "i4"]);
+    expect(s.extras).toHaveLength(1);
+    expect(s.extras[0].id).toBe("i1");
+    expect(s.extras[0].amount).toBe(-120.87);
+    expect(s.extras[0].refund).toBe(true);
+    expect(s.extras[0].cat).toBe("vie-quotidienne");
+    expect(s.extras[0].sub).toBe("alimentation");
+    expect(s.extras[0].day).toBe(21);
+    // Idempotent : un second passage ne change rien.
+    const s2 = migrateState(s);
+    expect(s2.incomes.map((i) => i.id)).toEqual(["i2", "i3", "i4"]);
+    expect(s2.extras).toHaveLength(1);
+  });
+
+  it("v0.31.1 : absorbe le revenu hérité quand le réimport a déjà créé le remboursement identique", () => {
+    // Cas du bug v0.31.0 : un même crédit existait comme ancien revenu ET
+    // comme remboursement dupliqué créé par le réimport → un seul reste.
+    const s = migrateState({
+      soldeDepart: 0,
+      incomes: [{ id: "i1", label: "Remboursement courses", amount: 120.87, mode: "unique", day: 21, y: 2026, m: 9, cat: "vie-quotidienne", sub: "alimentation", opLabel: "VIR RECU" }],
+      extras: [{ id: "x1", label: "Remboursement courses", amount: -120.87, refund: true, day: 21, y: 2026, m: 9, cat: "vie-quotidienne", sub: "alimentation", opLabel: "VIR RECU" }],
+    });
+    expect(s.incomes).toHaveLength(0);
+    expect(s.extras).toHaveLength(1); // pas deux : le doublon disparaît
+    expect(s.extras[0].amount).toBe(-120.87);
+    expect(s.extras[0].refund).toBe(true);
+  });
 });
 
 /* ------------------------------------------------------------------ */

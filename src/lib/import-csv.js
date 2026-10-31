@@ -500,13 +500,24 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
   const consumeKnown = (r) => {
     // Montant au sens de la convention de stockage du couple : opposé du
     // relevé pour une dépense (ou un remboursement), tel quel pour un revenu.
-    const stored = natureOfRow(r) === "depense" ? -r.amount : r.amount;
-    const base = [r.y, r.m, r.day, Math.round(stored * 100)];
-    for (const k of [base.concat(r.opLabel ?? "").join("|"), base.concat("").join("|")]) {
-      const n = known.get(k) ?? 0;
-      if (n > 0) {
-        known.set(k, n - 1);
-        return true;
+    const depense = natureOfRow(r) === "depense";
+    const stored = depense ? -r.amount : r.amount;
+    const bases = [[r.y, r.m, r.day, Math.round(stored * 100)]];
+    // Repli « héritage » : un crédit sur un couple de dépense peut être déjà
+    // représenté comme un ANCIEN revenu unique (importé avant les
+    // remboursements v0.31.0, donc stocké en montant positif). Le
+    // reconnaître ici évite de créer un remboursement en double au réimport
+    // d'un relevé déjà intégré par une version antérieure.
+    if (depense && r.amount > 0) {
+      bases.push([r.y, r.m, r.day, Math.round(r.amount * 100)]);
+    }
+    for (const base of bases) {
+      for (const k of [base.concat(r.opLabel ?? "").join("|"), base.concat("").join("|")]) {
+        const n = known.get(k) ?? 0;
+        if (n > 0) {
+          known.set(k, n - 1);
+          return true;
+        }
       }
     }
     return false;

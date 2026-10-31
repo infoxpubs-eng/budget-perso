@@ -23,6 +23,8 @@ import {
   subRecurring,
   subTransfer,
   taxCat,
+  taxSub,
+  subNature,
   TAXO_FLAGS_VERSION,
   applyDefaultFlags,
 } from "./taxonomie.js";
@@ -303,6 +305,62 @@ export function migrateState(raw) {
   // Réglages du modèle prédictif (fenêtre, seuil de présence, statistique) :
   // défauts fusionnés avec les choix de l'utilisateur, bornés.
   s.estimation = normEstimation({ ...DEFAULT_ESTIMATION, ...(raw?.estimation ?? {}) });
+  // Crédits sur couples de DÉPENSE importés avant les remboursements
+  // (v0.31.0) : ils étaient stockés comme des REVENUS uniques (montant
+  // positif). Alignement sur la nouvelle sémantique — conversion en
+  // remboursements (extras négatifs ↩ : même crédit au solde, mais une
+  // dépense en moins de leur couple dans les totaux et l'apprentissage des
+  // habitudes). Un remboursement identique déjà présent (créé par le
+  // réimport du même relevé sous v0.31.0) absorbe le revenu hérité : la
+  // double représentation disparaît, un seul crédit reste. Les revenus des
+  // couples de revenu ou inconnus (« À classer ») et les écritures planifiées
+  // (modes fixe/salaire, sans date unique) ne sont pas touchés.
+  const refundKeys = new Map();
+  for (const x of s.extras ?? []) {
+    if (x && typeof x.amount === "number" && x.amount < 0 && Number.isFinite(x.y) && Number.isFinite(x.m)) {
+      const k = [x.y, x.m, x.day, Math.round(x.amount * 100), x.opLabel ?? ""].join("|");
+      refundKeys.set(k, (refundKeys.get(k) ?? 0) + 1);
+    }
+  }
+  const keepIncomes = [];
+  const asRefunds = [];
+  let incomesChanged = false;
+  for (const i of s.incomes ?? []) {
+    const c = taxCat(i.cat, s.taxonomie);
+    const sub = c ? taxSub(c.id, i.sub, s.taxonomie) : undefined;
+    const herite =
+      i.mode === "unique" &&
+      c && subNature(c, sub) === "depense" &&
+      typeof i.amount === "number" && i.amount > 0 &&
+      Number.isFinite(i.y) && Number.isFinite(i.m);
+    if (!herite) {
+      keepIncomes.push(i);
+      continue;
+    }
+    incomesChanged = true;
+    const k = [i.y, i.m, i.day, Math.round(-i.amount * 100), i.opLabel ?? ""].join("|");
+    const n = refundKeys.get(k) ?? 0;
+    if (n > 0) {
+      // Déjà représenté par le remboursement du réimport : le revenu hérité
+      // disparaît, rien n'est créé (pas de double décompte du crédit).
+      refundKeys.set(k, n - 1);
+      continue;
+    }
+    asRefunds.push({
+      id: i.id,
+      label: i.label,
+      amount: -i.amount,
+      day: i.day,
+      y: i.y,
+      m: i.m,
+      cat: i.cat,
+      sub: i.sub,
+      opLabel: i.opLabel,
+      refund: true,
+    });
+  }
+  if (incomesChanged) s.incomes = keepIncomes;
+  if (asRefunds.length) s.extras = [...(s.extras ?? []), ...asRefunds];
   return s;
 }
 

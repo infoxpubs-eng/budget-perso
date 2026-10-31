@@ -301,6 +301,31 @@ describe("rowsToEntries — écritures déjà planifiées", () => {
     expect(surDepense.extras[0].amount).toBe(-500);
   });
 
+  it("crédit sur couple de dépense déjà représenté par un ancien revenu unique (avant v0.31.0) → PAS de remboursement en double", () => {
+    // Relevé déjà importé sous ≤ v0.30.12 : le crédit était devenu un revenu
+    // unique (même date, même montant). Au réimport sous v0.31.0, le repli
+    // « héritage » du registre reconnaît la ligne : rien n'est créé (le
+    // revenu hérité sera converti en remboursement par migrateState).
+    const herite = {
+      id: "i9", label: "Remboursement courses", amount: 120.87, mode: "unique",
+      day: 21, y: 2026, m: 9, cat: "vie-quotidienne", sub: "alimentation",
+      opLabel: "VIR RECU DE: FEDERATION SPORTIVE LGBT+",
+    };
+    const ligne = row({
+      amount: 120.87, day: 21, m: 9, cat: "vie-quotidienne", sub: "alimentation",
+      label: "Alimentation", opLabel: "VIR RECU DE: FEDERATION SPORTIVE LGBT+",
+    });
+    const r = rowsToEntries([ligne], { incomes: [herite] });
+    expect(r.extras).toHaveLength(0);
+    expect(r.refundsCount).toBe(0);
+    expect(r.incomes).toHaveLength(0);
+    // Sans le revenu hérité, le même crédit crée bien le remboursement.
+    const r2 = rowsToEntries([ligne], { incomes: [] });
+    expect(r2.extras).toHaveLength(1);
+    expect(r2.extras[0].refund).toBe(true);
+    expect(r2.extras[0].amount).toBe(-120.87);
+  });
+
   it("sans écritures planifiées : une ligne 🔁 isolée (un seul mois) devient une dépense datée, pas une série", () => {
     const { recurrentes, extras, incomes, newExpenses, couvertesOut, depensesTotal } = rowsToEntries([row()]);
     expect(recurrentes).toHaveLength(0);
