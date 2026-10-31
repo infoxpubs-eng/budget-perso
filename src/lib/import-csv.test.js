@@ -141,7 +141,7 @@ describe("rowsToEntries", () => {
     expect(!courant.oneShot).toBe(true); // dépense de vie courante
   });
 
-  it("route les débits vers des dépenses exceptionnelles, les crédits vers les revenus uniques", () => {
+  it("route les débits vers des dépenses exceptionnelles, les crédits sur couples de dépense en remboursements", () => {
     const { rows } = parseCsv(SAMPLE);
     // Deux mois de relevé (le même, décalé) : les séries 🔁 sont confirmées.
     const r = rowsToEntries([...rows, ...rows.map((x) => ({ ...x, m: 7 }))]);
@@ -150,17 +150,22 @@ describe("rowsToEntries", () => {
     expect(r.newExpenses).toHaveLength(3);
     expect(r.couvertesOut).toBe(8);
     // Solidarité : seule dépense non récurrente du relevé (×2 mois).
-    expect(r.extras).toHaveLength(2);
+    // Remboursement de frais : crédit sur un couple de DÉPENSE (services
+    // financiers) → remboursement, une dépense en moins (×2 lignes, ×2 mois).
+    expect(r.extras).toHaveLength(6);
     expect(r.extras[0].amount).toBe(105);
     expect(r.extras[0].cat).toBe("cadeaux-solidarite");
     expect(r.extras[0].sub).toBe("solidarite");
-    expect(r.depensesTotal).toBeCloseTo(210);
-    // Remboursements de frais : sous-catégorie non 🔁 → revenus uniques (×2 mois).
-    expect(r.incomes).toHaveLength(4);
-    expect(r.incomes[0].mode).toBe("unique");
-    expect(r.incomes[0].amount).toBe(1.35);
-    expect(r.incomes[0].cat).toBe("services-financiers");
-    expect(r.revenusTotal).toBeCloseTo(5.4);
+    expect(r.extras[1].refund).toBe(true);
+    expect(r.extras[1].amount).toBe(-1.35);
+    expect(r.extras[1].cat).toBe("services-financiers");
+    expect(r.extras[1].sub).toBe("remboursement-frais");
+    // Total net : solidarité (210) moins les remboursements (5,40).
+    expect(r.depensesTotal).toBeCloseTo(204.6);
+    expect(r.refundsCount).toBe(4);
+    expect(r.refundsTotal).toBeCloseTo(5.4);
+    expect(r.incomes).toHaveLength(0);
+    expect(r.revenusTotal).toBe(0);
     expect(r.recurrentes).toHaveLength(0);
 
     const t = r.newExpenses[0];
@@ -256,10 +261,12 @@ describe("rowsToEntries — écritures déjà planifiées", () => {
 
   it("ne double pas un revenu déjà planifié (mode fixe)", () => {
     const aide = { id: "i1", label: "Aide / allocations", amount: 180, day: 5, mode: "fixe" };
-    const r = rowsToEntries([row({ amount: 180 })], { incomes: [aide] });
+    const credit = row({ amount: 180, cat: "remboursements", sub: "remboursements-autres", label: "Remboursements - Autres" });
+    const r = rowsToEntries([credit], { incomes: [aide] });
     expect(r.incomes).toHaveLength(0);
     expect(r.recurrentes).toEqual([{ label: "Aide / allocations", amount: 180, kind: "revenu" }]);
     expect(r.revenusTotal).toBe(0);
+    expect(r.extras).toHaveLength(0);
   });
 
   it("compare la catégorie bancaire d'un revenu planifié quand elle est renseignée", () => {
@@ -273,16 +280,25 @@ describe("rowsToEntries — écritures déjà planifiées", () => {
 
   it("un revenu unique planifié ne s'applique qu'à son mois", () => {
     const unique = { id: "i3", label: "Prime", amount: 500, mode: "unique", day: 15, y: 2026, m: 8 };
-    const memeMois = rowsToEntries([row({ amount: 500 })], { incomes: [unique] });
+    const credit = (over = {}) => row({ amount: 500, cat: "remboursements", sub: "remboursements-autres", label: "Remboursements - Autres", ...over });
+    const memeMois = rowsToEntries([credit()], { incomes: [unique] });
     expect(memeMois.recurrentes).toHaveLength(1);
     expect(memeMois.newIncomes).toHaveLength(0);
-    const autreMois = rowsToEntries([row({ amount: 500, m: 9 })], { incomes: [unique] });
+    const autreMois = rowsToEntries([credit({ m: 9 })], { incomes: [unique] });
     expect(autreMois.recurrentes).toHaveLength(0);
-    // Loyers-charges 🔁 : crédit isolé (un seul mois) → revenu unique daté.
+    // Crédit sur couple de revenu, hors du mois de la prime → revenu unique daté.
     expect(autreMois.newIncomes).toHaveLength(0);
     expect(autreMois.incomes).toHaveLength(1);
     expect(autreMois.incomes[0].mode).toBe("unique");
     expect(autreMois.couvertesIn).toBe(0);
+    // Un crédit sur un couple de DÉPENSE (loyers-charges) au même montant
+    // est un remboursement, pas un revenu.
+    const surDepense = rowsToEntries([row({ amount: 500, m: 9 })], { incomes: [unique] });
+    expect(surDepense.recurrentes).toHaveLength(0);
+    expect(surDepense.incomes).toHaveLength(0);
+    expect(surDepense.extras).toHaveLength(1);
+    expect(surDepense.extras[0].refund).toBe(true);
+    expect(surDepense.extras[0].amount).toBe(-500);
   });
 
   it("sans écritures planifiées : une ligne 🔁 isolée (un seul mois) devient une dépense datée, pas une série", () => {
@@ -817,7 +833,8 @@ describe("historique réel des occurrences 🔁", () => {
 
   it("un revenu couvert par un revenu planifié alimente son historique (kind revenu)", () => {
     const aide = { id: "i1", label: "Aide / allocations", amount: 180, day: 5, mode: "fixe" };
-    const r = rowsToEntries([row({ amount: 180 })], { incomes: [aide] });
+    const credit = row({ amount: 180, cat: "remboursements", sub: "remboursements-autres", label: "Remboursements - Autres" });
+    const r = rowsToEntries([credit], { incomes: [aide] });
     expect(r.coveredHistory).toEqual([
       { id: "i1", kind: "revenu", obs: [{ day: 3, m: 8, y: 2026, amount: 180 }] },
     ]);
@@ -855,6 +872,15 @@ describe("mergeAddedLines (dédoublonnage au réimport)", () => {
     const added = [line(), line({ day: 12, amount: 22 })];
     expect(mergeAddedLines(added, added)).toHaveLength(0);
     expect(mergeAddedLines([line()], [line()])).toHaveLength(0);
+  });
+
+  it("clé signée : un remboursement déjà présent n'est pas dupliqué, un débit du même montant reste distinct", () => {
+    const refund = line({ amount: -30, refund: true, label: "Remboursement Restaurant" });
+    const debit = line({ amount: 30 });
+    // Le remboursement existe déjà : rien à ajouter.
+    expect(mergeAddedLines([refund], [{ ...refund, id: "x2" }])).toHaveLength(0);
+    // Le débit du même jour et du même montant absolu est une autre ligne.
+    expect(mergeAddedLines([refund], [debit])).toHaveLength(1);
   });
 
   it("les vrais doublons d'un relevé (deux opérations identiques) restent distincts", () => {
@@ -1036,7 +1062,7 @@ describe("import CSV — registre global des lignes déjà représentées", () =
   });
 
   it("rowsToEntries : ligne identique à une dépense exceptionnelle existante (avec libellé opération) est ignorée", () => {
-    const state = { expenses: [], incomes: [], extras: [{ id: "x1", day: 3, m: 3, y: 2026, amount: -12.39, cat: "sante", sub: "pharmacie", label: "Pharmacie et laboratoire", opLabel: "PHARMACIE CENTRALE" }] };
+    const state = { expenses: [], incomes: [], extras: [{ id: "x1", day: 3, m: 3, y: 2026, amount: 12.39, cat: "sante", sub: "pharmacie", label: "Pharmacie et laboratoire", opLabel: "PHARMACIE CENTRALE" }] };
     const csv = head + "03/04/2026;03/04/2026;PHARMACIE CENTRALE;Santé;Pharmacie et laboratoire;-12,39;Oui;\n";
     const r = rowsToEntries(rowsOf(csv), state, TAXONOMIE);
     expect(r.extras).toHaveLength(0);
@@ -1047,8 +1073,8 @@ describe("import CSV — registre global des lignes déjà représentées", () =
       expenses: [],
       incomes: [],
       extras: [
-        { id: "x1", day: 5, m: 8, y: 2026, amount: -12.39, cat: "sante", sub: "pharmacie", label: "Pharmacie et laboratoire", opLabel: "PHARMACIE CENTRALE" },
-        { id: "x2", day: 5, m: 8, y: 2026, amount: -12.39, cat: "sante", sub: "pharmacie", label: "Pharmacie et laboratoire", opLabel: "PHARMACIE CENTRALE" },
+        { id: "x1", day: 5, m: 8, y: 2026, amount: 12.39, cat: "sante", sub: "pharmacie", label: "Pharmacie et laboratoire", opLabel: "PHARMACIE CENTRALE" },
+        { id: "x2", day: 5, m: 8, y: 2026, amount: 12.39, cat: "sante", sub: "pharmacie", label: "Pharmacie et laboratoire", opLabel: "PHARMACIE CENTRALE" },
       ],
     };
     const csv = head +
@@ -1070,10 +1096,28 @@ describe("import CSV — registre global des lignes déjà représentées", () =
     const state = {
       expenses: [],
       incomes: [],
-      extras: [{ id: "x1", day: 5, m: 8, y: 2026, amount: -69.21, cat: "logement", sub: "assurance-habitation", label: "Assurance habitation et RC", opLabel: "PRELEVEMENT EUROPEEN DE: SOGESSUR" }],
+      extras: [{ id: "x1", day: 5, m: 8, y: 2026, amount: 69.21, cat: "logement", sub: "assurance-habitation", label: "Assurance habitation et RC", opLabel: "PRELEVEMENT EUROPEEN DE: SOGESSUR" }],
     };
     const csv = head + "05/09/2026;05/09/2026;PRELEVEMENT EUROPEEN 0227782496 DE: SOGESSUR ID: FR13ZZZ428225 MOTIF: SOGESSUR/000000004774884191523500;Logement;Assurance habitation et RC;-69,21;Oui;\n";
     const r = rowsToEntries(rowsOf(csv), state, TAXONOMIE);
     expect(r.extras).toHaveLength(0);
+  });
+
+  it("rowsToEntries : registre signé — un débit et son remboursement (même jour, même libellé) restent deux lignes distinctes", () => {
+    const csv = head +
+      "05/09/2026;05/09/2026;PHARMACIE CENTRALE;Santé;Pharmacie et laboratoire;-150,00;Oui;\n" +
+      "05/09/2026;05/09/2026;PHARMACIE CENTRALE;Santé;Pharmacie et laboratoire;150,00;Oui;\n";
+    const r = rowsToEntries(rowsOf(csv), { expenses: [], incomes: [] }, TAXONOMIE);
+    // Premier import : le débit devient une dépense, le crédit un remboursement.
+    expect(r.extras).toHaveLength(2);
+    expect(r.extras.filter((x) => x.amount > 0)).toHaveLength(1);
+    expect(r.extras.filter((x) => x.refund)).toHaveLength(1);
+    expect(r.extras.find((x) => x.refund).amount).toBe(-150);
+    expect(r.depensesTotal).toBe(0); // 150 − 150 : net
+    expect(r.refundsCount).toBe(1);
+    expect(r.refundsTotal).toBeCloseTo(150);
+    // Réimport du même relevé : tout est reconnu (clés signées), rien d'ajouté.
+    const r2 = rowsToEntries(rowsOf(csv), { expenses: [], incomes: [], extras: r.extras }, TAXONOMIE);
+    expect(r2.extras).toHaveLength(0);
   });
 });

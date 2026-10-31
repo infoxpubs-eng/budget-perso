@@ -198,10 +198,11 @@ function BalanceTooltip({ active, payload }) {
               <span className="text-slate-600">
                 {e.label}
                 {e.inc ? " 🔒" : ""}
+                {e.type === "refund" ? " ↩" : ""}
                 {e.transfer ? " ⇄" : e.rec ? " 🔁" : " ✨"}
               </span>
-              <span className={e.type === "in" ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
-                {e.type === "in" ? "+" : "−"}{fmt(Math.abs(e.amount))}
+              <span className={e.type === "out" ? "font-semibold text-rose-600" : "font-semibold text-emerald-600"}>
+                {e.type === "out" ? "−" : "+"}{fmt(Math.abs(e.amount))}
               </span>
             </div>
           ))}
@@ -438,17 +439,28 @@ export default function App() {
   const setBudget = (cat, n) => setState((s) => ({ ...s, budgets: { ...s.budgets, [cat]: n } }));
 
   // ----- Export / import / réinitialisation -----
+  // Télécharge une sauvegarde complète de l'état — données, historique des
+  // occurrences, nomenclature, enveloppes, réglages : tout ce qui est
+  // nécessaire pour restaurer l'application à l'identique.
+  const downloadBackup = (st) => {
+    const blob = new Blob([JSON.stringify(st, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "budget-perso-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const exportData = () => {
     try {
-      const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "budget-perso-" + new Date().toISOString().slice(0, 10) + ".json";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      downloadBackup(state);
+      setState((s) => ({
+        ...s,
+        backup: { ...(s.backup ?? { auto: true, lastAt: null }), lastAt: new Date().toISOString() },
+      }));
     } catch (e) {
       alert("Export impossible : " + e.message);
     }
@@ -462,8 +474,29 @@ export default function App() {
         if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.expenses) || !Array.isArray(parsed.incomes)) {
           throw new Error("structure inattendue");
         }
+        // Robustesse : un fichier de sauvegarde modifié à la main ou corrompu
+        // peut porter des montants négatifs sur des écritures planifiées
+        // (toujours positives par construction — les remboursements, eux,
+        // sont des extras négatifs légitimes et restent tels quels).
+        let fixed = 0;
+        for (const key of ["expenses", "incomes"]) {
+          parsed[key] = parsed[key].map((e) => {
+            const a = Number(e && e.amount);
+            if (Number.isFinite(a) && a < 0) {
+              fixed++;
+              return { ...e, amount: -a };
+            }
+            return e;
+          });
+        }
         setState(migrateState(parsed));
         setSelKey(null);
+        if (fixed > 0) {
+          alert(
+            "Sauvegarde restaurée avec " + fixed +
+            " correction(s) : montant(s) négatif(s) sur écriture(s) planifiée(s), normalisé(s)."
+          );
+        }
       } catch (e) {
         alert("Fichier invalide ou illisible.");
       }
@@ -514,47 +547,61 @@ export default function App() {
     const imp = csvImport;
     if (!imp) return;
     const { r, choices } = imp;
-    setState((s) => {
-      let taxo = s.taxonomie;
-      let mapping = [];
-      if (r.taxoAdditions.length) {
-        ({ taxo, mapping } = applyTaxoAdditions(s.taxonomie, r.taxoAdditions, choices));
-      }
-      const remap = (x) => {
-        if (x.cat !== A_CLASSER) return x;
-        const m = mapping.find((mm) => mm.from === A_CLASSER + "|" + x.sub);
-        return m ? { ...x, cat: m.cat, sub: m.sub, label: m.label } : x;
+    const s = state;
+    let taxo = s.taxonomie;
+    let mapping = [];
+    if (r.taxoAdditions.length) {
+      ({ taxo, mapping } = applyTaxoAdditions(s.taxonomie, r.taxoAdditions, choices));
+    }
+    const remap = (x) => {
+      if (x.cat !== A_CLASSER) return x;
+      const m = mapping.find((mm) => mm.from === A_CLASSER + "|" + x.sub);
+      return m ? { ...x, cat: m.cat, sub: m.sub, label: m.label } : x;
+    };
+    // Historique réel : les occurrences couvertes par une écriture déjà
+    // planifiée (dates et montants observés du relevé) lui sont rattachées.
+    // Rattachement au montant nouveau (syncAmount) : le montant prévisionnel
+    // d'une écriture 🔁 suit la dernière occurrence observée.
+    const withHistory = (entry, kind) => {
+      const c = r.coveredHistory.find((cv) => cv.id === entry.id && cv.kind === kind);
+      if (!c) return entry;
+      const history = mergeHistory(entry.history, c.obs);
+      const amount =
+        c.syncAmount && history.length > 0
+          ? history[history.length - 1].amount
+          : entry.amount;
+      return { ...entry, history, amount };
+    };
+    // Lignes ajoutées (dépenses et revenus uniques) dédoublonnées par
+    // multiset : réimporter un même relevé n'ajoute rien.
+    const extrasIn = mergeAddedLines(s.extras, r.extras.map(remap));
+    const uniquesIn = mergeAddedLines(s.incomes, r.incomes.map(remap));
+    const next = {
+      ...s,
+      taxonomie: taxo,
+      expenses: [...s.expenses.map((e) => withHistory(e, "depense")), ...r.newExpenses.map(remap)],
+      incomes: [
+        ...s.incomes.map((i) => withHistory(i, "revenu")),
+        ...r.newIncomes.map(remap),
+        ...uniquesIn,
+      ],
+      extras: [...s.extras, ...extrasIn],
+    };
+    // Sauvegarde automatique : un relevé fraîchement importé contient des
+    // données qu'on ne veut pas perdre. L'import est un geste utilisateur
+    // volontaire, le navigateur autorise donc le téléchargement d'une
+    // sauvegarde datée dans la foulée (le fichier capture l'état complet :
+    // données, nomenclature, enveloppes, réglages).
+    if (s.backup?.auto !== false) {
+      const stamped = {
+        ...next,
+        backup: { ...(next.backup ?? { auto: true, lastAt: null }), lastAt: new Date().toISOString() },
       };
-      // Historique réel : les occurrences couvertes par une écriture déjà
-      // planifiée (dates et montants observés du relevé) lui sont rattachées.
-      // Rattachement au montant nouveau (syncAmount) : le montant prévisionnel
-      // d'une écriture 🔁 suit la dernière occurrence observée.
-      const withHistory = (entry, kind) => {
-        const c = r.coveredHistory.find((cv) => cv.id === entry.id && cv.kind === kind);
-        if (!c) return entry;
-        const history = mergeHistory(entry.history, c.obs);
-        const amount =
-          c.syncAmount && history.length > 0
-            ? history[history.length - 1].amount
-            : entry.amount;
-        return { ...entry, history, amount };
-      };
-      // Lignes ajoutées (dépenses et revenus uniques) dédoublonnées par
-      // multiset : réimporter un même relevé n'ajoute rien.
-      const extrasIn = mergeAddedLines(s.extras, r.extras.map(remap));
-      const uniquesIn = mergeAddedLines(s.incomes, r.incomes.map(remap));
-      return {
-        ...s,
-        taxonomie: taxo,
-        expenses: [...s.expenses.map((e) => withHistory(e, "depense")), ...r.newExpenses.map(remap)],
-        incomes: [
-          ...s.incomes.map((i) => withHistory(i, "revenu")),
-          ...r.newIncomes.map(remap),
-          ...uniquesIn,
-        ],
-        extras: [...s.extras, ...extrasIn],
-      };
-    });
+      setState(stamped);
+      try { downloadBackup(stamped); } catch (e) {}
+    } else {
+      setState(next);
+    }
     setCsvImport(null);
   };
 
@@ -852,9 +899,9 @@ export default function App() {
                               <div className="font-semibold text-slate-600">{label} {MONTHS[sim.m]}</div>
                               {(day ? day.events : []).map((e, i) => (
                                 <div key={i} className="mt-1 flex justify-between gap-6">
-                                  <span>{e.label}{e.inc ? " 🔒" : ""}{e.transfer ? " ⇄" : e.rec ? " 🔁" : " ✨"}</span>
-                                  <span className={e.type === "in" ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
-                                    {e.type === "in" ? "+" : "−"}{fmt(Math.abs(e.amount))}
+                                  <span>{e.label}{e.inc ? " 🔒" : ""}{e.type === "refund" ? " ↩" : ""}{e.transfer ? " ⇄" : e.rec ? " 🔁" : " ✨"}</span>
+                                  <span className={e.type === "out" ? "font-semibold text-rose-600" : "font-semibold text-emerald-600"}>
+                                    {e.type === "out" ? "−" : "+"}{fmt(Math.abs(e.amount))}
                                   </span>
                                 </div>
                               ))}
@@ -1025,11 +1072,14 @@ export default function App() {
                             <Badge color={env ? env.color : "#94a3b8"}>{c ? c.label : "?"}</Badge>
                             {s && <span>{s.label}</span>}
                             {shot && <Badge color="#8b5cf6">one-shot</Badge>}
+                            {x.refund && <Badge color="#10b981">↩ remboursement</Badge>}
                             {x.incompressible && <IncBadge />}
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
-                          <span className="font-semibold text-rose-600">− {fmt(x.amount)}</span>
+                          <span className={x.amount < 0 ? "font-semibold text-emerald-600" : "font-semibold text-rose-600"}>
+                            {x.amount < 0 ? "+" : "−"} {fmt(Math.abs(x.amount))}
+                          </span>
                           <button
                             className={
                               "rounded-md px-2 py-1 text-xs font-medium transition " +
@@ -1410,7 +1460,7 @@ export default function App() {
         )}
 
         {/* ------------------------------ ADMIN ------------------------------ */}
-        {tab === "admin" && <AdminPanel state={state} setState={setState} prov={prov} simLabel={sim.label} />}
+        {tab === "admin" && <AdminPanel state={state} setState={setState} prov={prov} simLabel={sim.label} exportData={exportData} />}
 
         {/* ----------------------- DIALOGUE IMPORT CSV ----------------------- */}
         {csvImport && (
@@ -1457,6 +1507,13 @@ export default function App() {
                 {csvImport.r.extras.length > 0 && (
                   <div className="rounded-lg bg-slate-50 p-3 text-slate-700">
                     {csvImport.r.extras.length} dépense(s) non planifiée(s), total {fmt(csvImport.r.depensesTotal)}
+                  </div>
+                )}
+                {csvImport.r.refundsCount > 0 && (
+                  <div className="rounded-lg bg-emerald-50 p-3 text-slate-700">
+                    {csvImport.r.refundsCount} remboursement(s) sur couples de dépenses, total{" "}
+                    <span className="font-semibold text-emerald-700">+ {fmt(csvImport.r.refundsTotal)}</span>{" "}
+                    — comptés en dépenses en moins, pas en revenus.
                   </div>
                 )}
                 {csvImport.r.incomes.length > 0 && (
@@ -1948,7 +2005,7 @@ function IncomeForm({ sims, monthIdx, onAdd, taxo = TAXONOMIE }) {
  * (state.taxonomie) et utilisée par les formulaires, l'import CSV et les
  * totaux du mois.
  */
-function AdminPanel({ state, setState, prov, simLabel }) {
+function AdminPanel({ state, setState, prov, simLabel, exportData }) {
   const taxo = state.taxonomie ?? TAXONOMIE;
 
   // Nombre de dépenses récurrentes utilisant chaque couple cat|sub
@@ -2062,6 +2119,7 @@ function AdminPanel({ state, setState, prov, simLabel }) {
   };
 
   const est = state.estimation ?? DEFAULT_ESTIMATION;
+  const btnCls = "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-100";
   const setEst = (key, value) =>
     setState((s) => ({ ...s, estimation: { ...(s.estimation ?? DEFAULT_ESTIMATION), [key]: value } }));
 
@@ -2105,6 +2163,42 @@ function AdminPanel({ state, setState, prov, simLabel }) {
             Provision « habitudes » de {simLabel ?? "ce mois"} :{" "}
             <span className="font-semibold text-rose-600">− {fmt(prov?.total ?? 0)}</span>{" "}
             sur {prov?.lines.length ?? 0} couple(s) — recalculée à chaque réglage.
+          </div>
+        </Card>
+
+        <Card>
+          <h2 className="mb-1 font-semibold">💾 Sauvegarde & restauration</h2>
+          <p className="mb-4 text-xs text-slate-500">
+            Toutes vos données et réglages vivent uniquement dans le stockage de ce navigateur : en cas
+            de problème sur votre appareil (perte, réinitialisation, données de navigation effacées),
+            seule une sauvegarde exportée permet de les restituer. Avec la sauvegarde automatique,
+            chaque import de relevé télécharge en plus un fichier daté complet — données, historique,
+            nomenclature, enveloppes, réglages — restaurable partout via « Importer JSON ».
+          </p>
+          <div className="space-y-3 text-sm">
+            <CheckRow
+              checked={state.backup?.auto !== false}
+              onChange={(v) =>
+                setState((s) => ({
+                  ...s,
+                  backup: { auto: v, lastAt: s.backup?.lastAt ?? null },
+                }))
+              }
+              label="Sauvegarde automatique après chaque import de relevé"
+            />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs text-slate-500">
+                Dernière sauvegarde exportée :{" "}
+                {state.backup?.lastAt
+                  ? new Date(state.backup.lastAt).toLocaleDateString("fr-FR", { dateStyle: "long" }) +
+                    " à " +
+                    new Date(state.backup.lastAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+                  : "jamais"}
+              </span>
+              <button className={btnCls} onClick={exportData}>
+                Exporter maintenant
+              </button>
+            </div>
           </div>
         </Card>
 

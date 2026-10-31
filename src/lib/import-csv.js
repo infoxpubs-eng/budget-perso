@@ -35,7 +35,7 @@
  * Module sans dépendance React : testable isolément (voir import-csv.test.js).
  */
 
-import { TAXONOMIE, catByLabel, subByLabel, subByOperation, slugify, subIncompressible, subRecurring, subTransfer, addCategory, addSubcategory, taxSub, normalizeLabel, subOneShot } from "./taxonomie.js";
+import { TAXONOMIE, catByLabel, subByLabel, subByOperation, slugify, subIncompressible, subRecurring, subTransfer, addCategory, addSubcategory, taxCat, taxSub, normalizeLabel, subOneShot } from "./taxonomie.js";
 
 /**
  * Libellés typiques des virements d'épargne (Livret A, CSL, PEL…) : une
@@ -261,13 +261,15 @@ export function mergeAddedLines(existing = [], added = []) {
   // re-catégoriser a posteriori entre deux exports. Sans libellé opération
   // (anciennes lignes, avant stockage du champ) : repli sur l'ancienne
   // signature complète, date + couple + montant + libellé du couple.
+  // Le montant est SIGNÉ : une dépense (positive) et son remboursement
+  // (négatif) même jour, même libellé, restent deux lignes distinctes.
   const keyOf = (x) =>
     x.opLabel
       ? [
           x.day,
           x.m,
           x.y,
-          Math.round(Math.abs(x.amount ?? 0) * 100),
+          Math.round((x.amount ?? 0) * 100),
           x.opLabel,
         ].join("|")
       : [
@@ -276,7 +278,7 @@ export function mergeAddedLines(existing = [], added = []) {
           x.y,
           x.cat,
           x.sub,
-          Math.round(Math.abs(x.amount ?? 0) * 100),
+          Math.round((x.amount ?? 0) * 100),
           x.label,
         ].join("|");
   const counts = new Map();
@@ -393,6 +395,8 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
   const taxoAdditions = [];
   let depensesTotal = 0;
   let revenusTotal = 0;
+  let refundsCount = 0;
+  let refundsTotal = 0;
   let couvertesOut = 0;
   let couvertesIn = 0;
   const usedExpenses = new Set();
@@ -440,18 +444,35 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
   const recurringOut = new Map();
   const recurringIn = new Map();
 
+  // Nature du couple d'une ligne résolue : une sous-catégorie peut renverser
+  // la nature de sa catégorie (marqueur « revenu » dans une catégorie
+  // dépense). Couple inconnu de la nomenclature : la nature se déduit du
+  // signe (les crédits sur couples inconnus restent des revenus en attente
+  // de rangement dans le rapport d'import).
+  const natureOfRow = (r) => {
+    const c = taxCat(r.cat, taxo);
+    if (!c) return r.amount < 0 ? "depense" : "revenu";
+    const s = taxSub(c.id, r.sub, taxo);
+    return (s && s.nature) || c.nature || (r.amount < 0 ? "depense" : "revenu");
+  };
+
   // Registre global des lignes RÉELLES déjà représentées dans l'état —
   // quelle que soit la voie : occurrence d'écriture planifiée, dépense
-  // exceptionnelle ou revenu unique. La banque peut re-catégoriser une
-  // opération entre deux exports (le couple change, le libellé opération
-  // et la date non) : sans ce registre, la ligne ne matche plus sa voie
-  // d'origine et serait comptée une seconde fois (extra en double,
-  // occurrence fantôme ou série dupliquée). Consulté en REPLI, après
-  // l'échec du rattachement à une écriture planifiée : une ligne déjà
-  // historisée mais toujours rattachable reste rattachée (fusion idempotente).
+  // exceptionnelle, remboursement ou revenu unique. La banque peut
+  // re-catégoriser une opération entre deux exports (le couple change, le
+  // libellé opération et la date non) : sans ce registre, la ligne ne
+  // matche plus sa voie d'origine et serait comptée une seconde fois.
+  // Consulté en REPLI, après l'échec du rattachement à une écriture
+  // planifiée : une ligne déjà historisée mais toujours rattachable reste
+  // rattachée (fusion idempotente).
   // Clé « étiquetée » (date + montant + libellé opération) quand il est
   // connu ; repli « non étiquetée » (date + montant) pour les occurrences
   // et les anciennes lignes importées avant le stockage du libellé.
+  // Le montant est SIGNÉ, au sens de la convention de stockage : positive
+  // pour une dépense (les extras rangent l'opposé du relevé), négative
+  // pour un remboursement, positive pour un revenu — un débit et son
+  // remboursement, même jour et même libellé, restent ainsi deux lignes
+  // distinctes.
   const known = new Map(); // clé → multiplicité
   // Chaque ligne connue fournit DEUX tickets : la clé étiquetée (date +
   // montant + libellé) et la clé non étiquetée (date + montant). La banque
@@ -460,7 +481,7 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
   // mandat…) : la clé étiquetée ne matche alors plus, et le ticket non
   // étiqueté reconnaît la ligne malgré tout.
   const keyKnown = (y, m, day, amount, opLabel) =>
-    [y, m, day, Math.round(Math.abs(amount) * 100), opLabel ?? ""].join("|");
+    [y, m, day, Math.round(amount * 100), opLabel ?? ""].join("|");
   const addKnown = (y, m, day, amount, opLabel) => {
     const k = keyKnown(y, m, day, amount, opLabel);
     known.set(k, (known.get(k) ?? 0) + 1);
@@ -477,7 +498,10 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
   }
   for (const x of planned.extras ?? []) addKnown(x.y, x.m, x.day, x.amount, x.opLabel);
   const consumeKnown = (r) => {
-    const base = [r.y, r.m, r.day, Math.round(Math.abs(r.amount) * 100)];
+    // Montant au sens de la convention de stockage du couple : opposé du
+    // relevé pour une dépense (ou un remboursement), tel quel pour un revenu.
+    const stored = natureOfRow(r) === "depense" ? -r.amount : r.amount;
+    const base = [r.y, r.m, r.day, Math.round(stored * 100)];
     for (const k of [base.concat(r.opLabel ?? "").join("|"), base.concat("").join("|")]) {
       const n = known.get(k) ?? 0;
       if (n > 0) {
@@ -537,6 +561,31 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
       });
       depensesTotal += -r.amount;
     } else {
+      // Crédit sur un couple de nature DÉPENSE → remboursement : une dépense
+      // en moins de son couple (extra à montant négatif), pas un revenu. Le
+      // solde est identique, mais les totaux de dépenses du mois, le « déjà
+      // dépensé » des habitudes et l'apprentissage des tendances voient le
+      // NET du couple. Les crédits sur couples de revenu (ou inconnus, en
+      // attente de rangement) restent des revenus.
+      if (natureOfRow(r) === "depense") {
+        extras.push({
+          id: newId(),
+          label: r.label,
+          amount: -r.amount, // négatif = remboursement
+          day: r.day,
+          y: r.y,
+          m: r.m,
+          cat: r.cat,
+          sub: r.sub,
+          opLabel: r.opLabel,
+          refund: true,
+          oneShot: subOneShot(r.cat, r.sub, taxo) || undefined,
+        });
+        depensesTotal += -r.amount; // négatif : réduit le total des dépenses
+        refundsCount += 1;
+        refundsTotal += r.amount;
+        continue;
+      }
       if (subIsRecurring(r.cat, r.sub, taxo)) {
         const x = incomesPlanned.find((x) => matchesPlannedIncome(r, x));
         if (x) {
@@ -722,6 +771,8 @@ export function rowsToEntries(rows, planned = {}, taxo = TAXONOMIE) {
     coveredHistory: [...covered.values()],
     depensesTotal,
     revenusTotal,
+    refundsCount,
+    refundsTotal,
   };
 }
 

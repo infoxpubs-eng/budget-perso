@@ -5,6 +5,18 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.31.0] — 2026-10-31
+
+### Ajouté
+
+- **Sauvegarde de secours automatique** 💾 : à chaque import de relevé CSV confirmé, un fichier de sauvegarde daté (`budget-perso-YYYY-MM-DD.json`, complet : données, historique des occurrences, nomenclature, enveloppes, réglages) est téléchargé automatiquement — un problème de navigateur ou de téléphone ne fait plus perdre les données, la restauration passe par « Importer JSON ». Nouvelle carte « 💾 Sauvegarde & restauration » dans l'onglet 🛠️ Admin : activation/désactivation, date de la dernière sauvegarde, bouton d'export immédiat.
+- **Restauration durcie** : un fichier de sauvegarde modifié ou corrompu peut porter des montants négatifs sur des écritures planifiées (toujours positives par construction) — ils sont normalisés au moment de l'import avec compte et alerte (les remboursements, extras à montant négatif légitimes, ne sont pas touchés).
+
+### Modifié
+
+- **Les remboursements sont des dépenses en moins, pas des revenus** : un crédit bancaire arrivant sur un couple de nature **dépense** (ex. remboursement de pharmacie sur Santé) devient un extra marqué ↩ à montant négatif — le solde est inchangé (toujours crédité), mais le total des dépenses du mois, le « déjà dépensé » des habitudes et l'apprentissage des tendances voient le coût **net** du couple. Les crédits sur les couples de **revenu** (ou inconnus, « À classer ») restent des revenus. Corrige au passage les crédits sur sous-catégories récurrentes de dépense, qui créaient des séries de revenus parasites.
+- **Registre anti-doublons à clés signées** : les lignes réelles déjà représentées sont identifiées par leur montant au sens de la convention de stockage (positif pour un débit, négatif pour un remboursement) — un débit et son remboursement du même jour et du même libellé restent deux lignes distinctes au réimport.
+
 ## [0.30.12] — 2026-10-31
 
 ### Modifié

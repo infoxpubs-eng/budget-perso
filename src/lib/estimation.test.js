@@ -47,9 +47,17 @@ describe("monthlySpendByCouple", () => {
 
   it("ignore les lignes sans montant ni date valides", () => {
     const by = monthlySpendByCouple([
-      { cat: "a", sub: "b" }, { y: 2026, m: 1, amount: -5, cat: "a", sub: "b" },
+      { cat: "a", sub: "b" }, { y: 2026, m: 1, amount: 0, cat: "a", sub: "b" },
     ]);
     expect(by.size).toBe(0);
+  });
+
+  it("un remboursement (montant négatif) vient en déduction du total net du mois", () => {
+    const by = monthlySpendByCouple([
+      x(2026, 7, 2, 30),
+      { y: 2026, m: 7, day: 20, amount: -12, cat: "loisirs", sub: "restaurants", label: "Remboursement" },
+    ]);
+    expect(by.get("loisirs|restaurants").get(2026 * 12 + 7)).toBe(18);
   });
 });
 

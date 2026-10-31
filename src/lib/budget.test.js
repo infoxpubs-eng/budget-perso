@@ -228,6 +228,13 @@ describe("migrateState", () => {
     const s2 = migrateState({ estimation: { window: 99, presenceMin: 2, stat: "inconnu" } });
     expect(s2.estimation).toEqual({ window: 24, presenceMin: 1, stat: "mediane" });
   });
+
+  it("fournit les réglages de sauvegarde par défaut (auto, jamais exécutée)", () => {
+    const s = migrateState({ soldeDepart: 0 });
+    expect(s.backup).toEqual({ auto: true, lastAt: null });
+    const s2 = migrateState({ soldeDepart: 0, backup: { auto: false, lastAt: "2026-10-31T08:00:00.000Z" } });
+    expect(s2.backup).toEqual({ auto: false, lastAt: "2026-10-31T08:00:00.000Z" });
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -1122,6 +1129,30 @@ describe("realMonthSim — chaînage réel", () => {
   it("un mois sans données réelles reste simulé par monthSim (hors chaînage réel)", () => {
     const mo = monthSim(st(), 2026, 8, 500); // septembre : rien de chargé → loyer planifié −850
     expect(mo.end).toBe(-350);
+  });
+
+  it("un remboursement (extra négatif) crédite le solde et réduit le total des dépenses, sans jamais être un revenu", () => {
+    const s = st();
+    s.extras = [
+      { y: 2026, m: 4, day: 15, amount: 100, cat: "loisirs", sub: "restaurants", label: "Resto" },
+      { y: 2026, m: 4, day: 20, amount: -40, refund: true, cat: "loisirs", sub: "restaurants", label: "Remboursement Resto" },
+    ];
+    const mai = realMonthSim(s, 2026, 4, 1000);
+    // −820 (loyer réel) − 100 (extra) + 40 (remboursement)
+    expect(mai.end).toBe(120);
+    expect(mai.totalOut).toBe(880); // 820 + 100 − 40 : net du couple
+    expect(mai.totalIn).toBe(0); // jamais compté comme un revenu
+    const tx = mai.tx.find((t) => t.type === "refund");
+    expect(tx).toBeTruthy();
+    expect(tx.amount).toBe(40);
+    // Même logique en simulation planifiée (monthSim / transactionsOfMonth).
+    const b = baseState();
+    b.extras = [{ id: "x1", y: 2026, m: 0, day: 10, amount: -50, refund: true, cat: "vie-quotidienne", sub: "alimentation", label: "Remboursement courses" }];
+    const janv = monthSim(b, 2026, 0, 500);
+    // 500 − 800 (loyer) − 200 (courses) + 2000 (salaire) + 50 (remboursement)
+    expect(janv.end).toBe(1550);
+    expect(janv.totalOut).toBe(950);
+    expect(janv.tx.find((t) => t.type === "refund")).toBeTruthy();
   });
 });
 

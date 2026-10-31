@@ -182,6 +182,9 @@ export function migrateState(raw) {
     ...i,
   }));
   s.taxonomie = normalizeTaxonomie(s.taxonomie);
+  // Sauvegarde automatique : réglage persisté avec l'état (téléchargement
+  // d'une sauvegarde datée après chaque import de relevé, voir App.jsx).
+  s.backup = { auto: s.backup?.auto !== false, lastAt: s.backup?.lastAt ?? null };
   // Marqueurs 🔁/🔒 par défaut : appliqués une seule fois (fusion), puis la
   // version est enregistrée pour ne plus écraser les choix de l'utilisateur.
   if (s.taxoFlagsVersion !== TAXO_FLAGS_VERSION) {
@@ -369,16 +372,21 @@ export function transactionsOfMonth(state, y, m) {
 
   for (const x of state.extras ?? []) {
     if (x.y !== y || x.m !== m) continue;
+    // Remboursement (montant négatif) : crédit sur le compte. Un transfert
+    // interne (retrait d'épargne) reste « in » ⇄ ; sinon type « refund » :
+    // le total des dépenses du mois est décrémenté (dépense en moins du
+    // couple), jamais compté comme un revenu.
+    const transfer = subTransfer(x.cat ?? "logement", x.sub ?? "frais-exceptionnels", taxo);
     tx.push({
       day: Math.min(x.day, dim),
       label: x.label,
       amount: -x.amount,
-      type: "out",
+      type: x.amount < 0 ? (transfer ? "in" : "refund") : "out",
       cat: x.cat ?? "logement",
       sub: x.sub ?? "frais-exceptionnels",
       inc: !!x.incompressible || subIncompressible(x.cat, x.sub, state.taxonomie),
       rec: false,
-      transfer: subTransfer(x.cat ?? "logement", x.sub ?? "frais-exceptionnels", taxo),
+      transfer,
     });
   }
 
@@ -632,20 +640,24 @@ export function realTransactionsOfMonth(state, y, m, { today = null } = {}) {
     }
   }
 
-  // Dépenses exceptionnelles réelles du mois.
+  // Dépenses exceptionnelles réelles du mois. Un montant négatif est un
+  // remboursement : crédit sur le compte, dépense en moins de son couple
+  // (type « refund ») — ou retrait d'épargne ⇄ si le couple est un transfert
+  // interne.
   for (const x of state.extras ?? []) {
     if (x.y !== y || x.m !== m) continue;
+    const transfer = subTransfer(x.cat ?? "logement", x.sub ?? "frais-exceptionnels", state.taxonomie);
     tx.push({
       day: Math.min(x.day, dim),
       label: x.label,
       amount: -x.amount,
-      type: "out",
+      type: x.amount < 0 ? (transfer ? "in" : "refund") : "out",
       cat: x.cat ?? "logement",
       sub: x.sub ?? "frais-exceptionnels",
       inc: !!x.incompressible || subIncompressible(x.cat, x.sub, state.taxonomie),
       rec: false,
       real: true,
-      transfer: subTransfer(x.cat ?? "logement", x.sub ?? "frais-exceptionnels", state.taxonomie),
+      transfer,
     });
   }
 

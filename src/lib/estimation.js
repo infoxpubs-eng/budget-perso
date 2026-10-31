@@ -98,7 +98,9 @@ export function meanOf(values = []) {
 export function monthlySpendByCouple(extras = []) {
   const by = new Map();
   for (const x of extras ?? []) {
-    if (!x || typeof x.amount !== "number" || x.amount <= 0) continue;
+    // Montants signés : un remboursement (négatif) vient en déduction du
+    // mois du couple — l'apprentissage des habitudes voit le coût NET.
+    if (!x || typeof x.amount !== "number" || x.amount === 0) continue;
     if (!Number.isFinite(x.y) || !Number.isFinite(x.m)) continue;
     const k = (x.cat ?? "?") + "|" + (x.sub ?? "?");
     if (!by.has(k)) by.set(k, new Map());
