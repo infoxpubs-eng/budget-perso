@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.31.3] — 2026-10-31
+
+### Ajouté
+
+- **Bloc « Remboursements » dans l'onglet Dépenses** : les remboursements ↩ (crédits arrivés sur des couples de dépense, comptés en dépenses en moins) ont désormais leur liste dédiée — triée du plus ancien au plus récent, avec le libellé opération bancaire affiché sous chaque intitulé : deux lignes identiques à la même date (doublon) se lisent côte à côte, et un remboursement erroné se supprime d'un clic (✕). Le bloc affiche aussi le total des remboursements. La liste « Dépenses non planifiées » ne montre plus que les vraies dépenses — un remboursement n'y est plus noyé parmi des centaines de lignes non triées.
+
 ## [0.31.2] — 2026-10-31
 
 ### Corrigé

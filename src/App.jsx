@@ -432,6 +432,11 @@ export default function App() {
   const delExpense = (id) => setState((s) => ({ ...s, expenses: s.expenses.filter((x) => x.id !== id) }));
   const addExtra = (x) => setState((s) => ({ ...s, extras: [...s.extras, x] }));
   const delExtra = (id) => setState((s) => ({ ...s, extras: s.extras.filter((x) => x.id !== id) }));
+  // Remboursements ↩ (extras à montant négatif) : liste dédiée de l'onglet
+  // Dépenses, triée par date pour repérer les doublons côte à côte.
+  const refunds = [...state.extras]
+    .filter((x) => x.refund)
+    .sort((a, b) => a.y - b.y || a.m - b.m || (a.day ?? 0) - (b.day ?? 0));
   const patchExtra = (id, patch) =>
     setState((s) => ({ ...s, extras: s.extras.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
   const addIncome = (i) => setState((s) => ({ ...s, incomes: [...s.incomes, i] }));
@@ -1052,13 +1057,16 @@ export default function App() {
               </Card>
 
               <Card>
-                <h2 className="mb-1 font-semibold">Dépenses non planifiées ({state.extras.length})</h2>
+                <h2 className="mb-1 font-semibold">
+                  Dépenses non planifiées ({state.extras.filter((x) => !x.refund).length})
+                </h2>
                 <p className="mb-3 text-xs text-slate-500">
                   Dépenses unitaires, à une date précise : vie courante (l'enveloppe de leur catégorie) ou
                   one-shot — ponctuelles, à durée limitée (enveloppe « Exceptionnelles », exclues des habitudes).
+                  Les remboursements ↩ sont listés à part, dans le bloc dédié ci-dessous.
                 </p>
                 <div className="space-y-2">
-                  {state.extras.map((x) => {
+                  {state.extras.filter((x) => !x.refund).map((x) => {
                     const c = taxCat(x.cat, taxo);
                     const s = taxSub(x.cat, x.sub, taxo);
                     const shot = extraOneShot(x, taxo);
@@ -1103,9 +1111,60 @@ export default function App() {
                       </div>
                     );
                   })}
-                  {state.extras.length === 0 && (
+                  {state.extras.every((x) => x.refund) && (
                     <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
                       Aucune dépense non planifiée.
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              <Card>
+                <h2 className="mb-1 font-semibold">
+                  Remboursements ({refunds.length}) — total{" "}
+                  <span className="text-emerald-600">+ {fmt(refunds.reduce((a, x) => a + Math.abs(x.amount), 0))}</span>
+                </h2>
+                <p className="mb-3 text-xs text-slate-500">
+                  Crédits arrivés sur des couples de dépense : comptés en dépenses en moins (↩), jamais comme
+                  revenus. Triés du plus ancien au plus récent — deux lignes identiques à la même date signalent
+                  un doublon à supprimer.
+                </p>
+                <div className="space-y-2">
+                  {refunds.map((x) => {
+                    const c = taxCat(x.cat, taxo);
+                    const s = c ? taxSub(c.id, x.sub, taxo) : undefined;
+                    return (
+                      <div key={x.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">{x.label}</div>
+                          {x.opLabel && (
+                            <div className="mt-0.5 truncate text-xs text-slate-400" title={x.opLabel}>
+                              {x.opLabel}
+                            </div>
+                          )}
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                            <span>{monthLabel(x.y, x.m)} · le {x.day}</span>
+                            <Badge color="#64748b">{c ? c.label : "?"}</Badge>
+                            {s && <span>{s.label}</span>}
+                            <Badge color="#10b981">↩ remboursement</Badge>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-semibold text-emerald-600">+ {fmt(Math.abs(x.amount))}</span>
+                          <button
+                            className="rounded-md px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                            onClick={() => delExtra(x.id)}
+                            title="Supprimer"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {refunds.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
+                      Aucun remboursement.
                     </div>
                   )}
                 </div>
