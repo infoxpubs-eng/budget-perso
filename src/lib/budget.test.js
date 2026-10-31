@@ -8,6 +8,7 @@ import {
   monthLabel,
   freqInMonth,
   isBusinessDay,
+  isHoliday,
   lastBusinessDay,
   salaryPayDay,
   migrateState,
@@ -145,6 +146,58 @@ describe("salaryPayDay (avant-veille du dernier jour ouvré)", () => {
       const d = new Date(2027, m, salaryPayDay(2027, m));
       expect(isBusinessDay(d)).toBe(true);
     }
+  });
+});
+
+describe("Jours fériés français", () => {
+  it("reconnaît les fériés fixes de 2026", () => {
+    expect(isHoliday(new Date(2026, 0, 1))).toBe(true);   // Jour de l'an
+    expect(isHoliday(new Date(2026, 4, 1))).toBe(true);    // 1er mai
+    expect(isHoliday(new Date(2026, 4, 8))).toBe(true);    // 8 mai
+    expect(isHoliday(new Date(2026, 6, 14))).toBe(true);   // 14 juillet
+    expect(isHoliday(new Date(2026, 7, 15))).toBe(true);   // 15 août
+    expect(isHoliday(new Date(2026, 10, 1))).toBe(true);   // Toussaint
+    expect(isHoliday(new Date(2026, 10, 11))).toBe(true);  // Armistice
+    expect(isHoliday(new Date(2026, 11, 25))).toBe(true);  // Noël
+  });
+
+  it("reconnaît les fériés mobiles de 2026 (Pâques le 5 avril)", () => {
+    expect(isHoliday(new Date(2026, 3, 6))).toBe(true);   // lundi de Pâques
+    expect(isHoliday(new Date(2026, 4, 14))).toBe(true);   // Ascension
+    expect(isHoliday(new Date(2026, 4, 25))).toBe(true);   // lundi de Pentecôte
+  });
+
+  it("n'est pas férié les autres jours", () => {
+    expect(isHoliday(new Date(2026, 3, 5))).toBe(false);   // dimanche de Pâques
+    expect(isHoliday(new Date(2026, 4, 13))).toBe(false);  // mercredi avant l'Ascension
+    expect(isHoliday(new Date(2026, 0, 2))).toBe(false);   // 2 janvier
+    expect(isHoliday(new Date(2027, 2, 28))).toBe(false);  // dimanche de Pâques 2027
+  });
+
+  it("un jour ouvré exclut les week-ends et les fériés", () => {
+    expect(isBusinessDay(new Date(2026, 3, 6))).toBe(false);  // lundi de Pâques
+    expect(isBusinessDay(new Date(2027, 2, 29))).toBe(false); // lundi de Pâques 2027
+  });
+
+  it("dernier jour ouvré : un férié en début de mois est sans effet", () => {
+    expect(lastBusinessDay(2026, 3).getDate()).toBe(30); // avril 2026 : lundi de Pâques le 6, 30 = jeudi
+  });
+});
+
+describe("salaryPayDay décalé par un férié", () => {
+  it("mai 2025 : l'Ascension (jeudi 29) fait reculer la paie de 28 à 27", () => {
+    // dernier JO vendredi 30 ; 29 = Ascension (sauté), puis 28 (1er), 27 (2ᵉ)
+    expect(salaryPayDay(2025, 4)).toBe(27);
+  });
+
+  it("mars 2027 : le lundi de Pâques (29) fait reculer la paie de 29 à 26", () => {
+    // dernier JO mercredi 31 ; 30 (1er), 29 = Pâques (sauté), week-end, 26 (2ᵉ)
+    expect(salaryPayDay(2027, 2)).toBe(26);
+  });
+
+  it("les mois sans férié en fin de mois sont inchangés", () => {
+    expect(salaryPayDay(2026, 9)).toBe(28);  // oct. 2026
+    expect(salaryPayDay(2027, 3)).toBe(28); // avril 2027 : dernier JO 30 (ven) -> 28 (mer)
   });
 });
 

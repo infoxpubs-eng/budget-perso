@@ -5,6 +5,21 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.32.0] — 2026-10-31
+
+### Ajouté
+
+- **Bandeau d'alerte d'échec de sauvegarde** : la sauvegarde automatique (localStorage) échouait silencieusement — stockage plein, bloqué par le navigateur ou mode privé. Un bandeau rouge apparaît désormais en tête de l'application, invitant à exporter une sauvegarde depuis 🛠️ Admin → 💾 ; il se masque d'un clic et disparaît dès que l'enregistrement réussit à nouveau.
+- **Édition en place des écritures planifiées** : un bouton ✏️ sur chaque ligne de « Dépenses planifiées » et « Entrées d'argent » ouvre un formulaire inline (libellé, montant, jour — et fréquence/mois pour les dépenses ; le jour est masqué pour les salaires, versés à date fixe par la banque). Corriger un montant ou une date ne impose plus de supprimer puis recréer la ligne.
+- **Historique des prévisions** : au premier affichage d'un mois (courant, puis suivant), l'application conserve dans l'état un instantané de sa prévision du moment — solde fin de mois probable et solde avant salaire — jamais écrasé ensuite. Un bloc repliable « Historique des prévisions » dans l'Aperçu liste ces instantanés et affiche, une fois le mois réel chargé, l'écart entre l'annonce du modèle et le réel. Un modèle vide (premier lancement) n'est jamais historisé.
+- **Jours fériés français dans le calendrier des jours ouvrés** : `isBusinessDay`/`lastBusinessDay`/`salaryPayDay` prennent désormais en compte les fériés fixes (Jour de l'an, 1er et 8 mai, 14 juillet, 15 août, Toussaint, 11 novembre, Noël) et mobiles (lundi de Pâques, Ascension, lundi de Pentecôte — algorithme de Pâques grégorien). Le jour de paie (avant-veille du dernier jour ouvré) recule d'autant quand un férié se glisse entre les deux : mai 2025 (Ascension le 29) paie le 27 au lieu du 28, mars 2027 (lundi de Pâques le 29) paie le 26 au lieu du 29.
+
+### Modifié
+
+- **KPI de l'Aperçu regroupés** : les 8 indicateurs sont désormais organisés en deux groupes labellisés — « Réalisé » (solde en début de mois, revenus, dépenses, solde actuel) puis « Projection » (solde fin de mois, flux épargne net, solde fin de mois probable, solde avant salaire) — au lieu d'une rangée unique de 8 cartes.
+- **Tons harmonisés** : les cartes de solde (« Solde actuel », « Solde fin de mois », « Solde fin de mois probable ») utilisent toutes le même code couleur que « Solde avant salaire » : vert si positif, rouge si négatif (l'indigo ne distingue plus rien).
+- **Budget par catégorie — enveloppe non définie** : sans enveloppe renseignée (0 €) avec des dépenses planifiées, le badge rouge « Dépassé de X € » n'a pas de sens ; il devient un libellé neutre « Pas d'enveloppe définie », et la barre ne passe plus en rouge. Un vrai dépassement d'enveloppe reste signalé comme avant.
+
 ## [0.31.5] — 2026-10-31
 
 ### Ajouté

@@ -88,10 +88,53 @@ export function freqInMonth(freq, month, m) {
 /* Jours ouvrés                                                       */
 /* ------------------------------------------------------------------ */
 
-/** Samedi/dimanche exclus. */
+/**
+ * Dimanche de Pâques (algorithme de Meeus/Jones/Butcher, calendrier grégorien).
+ * Retourne [mois 0-indexé, jour].
+ */
+function easterSunday(y) {
+  const a = y % 19;
+  const b = Math.floor(y / 100);
+  const c = y % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return [month - 1, day];
+}
+
+/**
+ * Jours fériés légaux français : fixes (Jour de l'an, 1er et 8 mai, 14 juillet,
+ * 15 août, Toussaint, 11 novembre, Noël) et mobiles (lundi de Pâques,
+ * Ascension, lundi de Pentecôte) calculés à partir de Pâques.
+ */
+export function isHoliday(date) {
+  const y = date.getFullYear();
+  const m = date.getMonth();
+  const d = date.getDate();
+  if (
+    (m === 0 && d === 1) || (m === 4 && d === 1) || (m === 4 && d === 8) ||
+    (m === 6 && d === 14) || (m === 7 && d === 15) || (m === 10 && d === 1) ||
+    (m === 10 && d === 11) || (m === 11 && d === 25)
+  ) {
+    return true;
+  }
+  const [em, ed] = easterSunday(y);
+  const diff = Math.round((new Date(y, m, d) - new Date(y, em, ed)) / 86400000);
+  return diff === 1 || diff === 39 || diff === 50;
+}
+
+/** Samedis/dimanches et jours fériés français exclus. */
 export function isBusinessDay(date) {
   const w = date.getDay();
-  return w !== 0 && w !== 6;
+  return w !== 0 && w !== 6 && !isHoliday(date);
 }
 
 /** Dernier jour ouvré d'un mois (semaine de 5 jours, hors jours fériés). */
@@ -103,7 +146,8 @@ export function lastBusinessDay(y, m) {
 
 /**
  * Jour de versement d'un salaire : l'avant-veille du dernier jour ouvré du mois,
- * c'est-à-dire 2 jours ouvrés avant le dernier jour ouvré (week-ends franchis).
+ * c'est-à-dire 2 jours ouvrés avant le dernier jour ouvré (week-ends et jours
+ * fériés français franchis).
  */
 export function salaryPayDay(y, m) {
   const d = lastBusinessDay(y, m);
@@ -187,6 +231,8 @@ export function migrateState(raw) {
   // Sauvegarde automatique : réglage persisté avec l'état (téléchargement
   // d'une sauvegarde datée après chaque import de relevé, voir App.jsx).
   s.backup = { auto: s.backup?.auto !== false, lastAt: s.backup?.lastAt ?? null };
+  // Historisation des prévisions : instantanés par mois, jamais écrasés.
+  s.forecastSnapshots = s.forecastSnapshots ?? {};
   // Marqueurs 🔁/🔒 par défaut : appliqués une seule fois (fusion), puis la
   // version est enregistrée pour ne plus écraser les choix de l'utilisateur.
   if (s.taxoFlagsVersion !== TAXO_FLAGS_VERSION) {

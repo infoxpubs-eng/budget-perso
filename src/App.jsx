@@ -301,11 +301,18 @@ export default function App() {
   }, []);
 
   // ----- Persistance : sauvegarde à chaque modification -----
+  // Une erreur d'écriture (quota localStorage dépassé, stockage bloqué par le
+  // navigateur, mode privé…) doit être visible : sinon l'utilisateur croit ses
+  // données enregistrées alors que rien n'a été persisté.
+  const [saveError, setSaveError] = useState(null);
   useEffect(() => {
     if (!loaded) return;
     try {
       localStorage.setItem("budget-perso-v2", JSON.stringify(state));
-    } catch (e) {}
+      setSaveError(null);
+    } catch (e) {
+      setSaveError(true);
+    }
   }, [state, loaded]);
 
   const start = useMemo(() => ({ y: now.getFullYear(), m: now.getMonth() }), []);
@@ -458,6 +465,53 @@ export default function App() {
   };
   const avantSalaireProbable = beforeSalaryProbableOf(sim);
   const provAvantSalaire = avantSalaire === null || avantSalaireProbable == null ? 0 : avantSalaire - avantSalaireProbable;
+
+  // ----- Historisation des prévisions -----
+  // Au premier chargement d'un mois (le courant, puis le suivant), un
+  // instantané de la prévision du moment est conservé dans l'état — jamais
+  // écrasé ensuite. Il permet de comparer plus tard « ce que le modèle
+  // annonçait à l'époque » au réel une fois le mois écoulé.
+  useEffect(() => {
+    if (!loaded) return;
+    setState((s) => {
+      // Rien à historiser sur un modèle vide (premier lancement) : la capture
+      // attendra le premier mois affiché avec des écritures.
+      if (!s.incomes.length && !s.expenses.length) return s;
+      const snaps = s.forecastSnapshots ?? {};
+      const added = {};
+      const cible = [
+        monthsAll.find((x) => x.y === nowY && x.m === nowM),
+        monthsAll.find((x) => x.y === nextMois.getFullYear() && x.m === nextMois.getMonth()),
+      ];
+      for (const mo of cible) {
+        if (!mo || snaps[mo.y + "-" + mo.m]) continue;
+        const provTotal = provTotalOf(mo.y, mo.m, mo.y === nowY && mo.m === nowM ? now.getDate() : null);
+        added[mo.y + "-" + mo.m] = {
+          savedAt: new Date().toISOString(),
+          end: mo.end,
+          probable: mo.end - provTotal,
+          avant: beforeSalaryProbableOf(mo),
+        };
+      }
+      if (!Object.keys(added).length) return s;
+      return { ...s, forecastSnapshots: { ...snaps, ...added } };
+    });
+    // Un seul passage au chargement : les captures ne sont jamais écrasées.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
+  // Instantanés persistés, triés du plus récent au plus ancien, enrichis du
+  // réel quand le mois correspondant est chargé (mois écoulé).
+  const snapEntries = Object.entries(state.forecastSnapshots ?? {})
+    .map(([key, snap]) => {
+      const [y, m] = key.split("-").map(Number);
+      const mo = monthsAll.find((x) => x.y === y && x.m === m);
+      const isCurrent = y === nowY && m === nowM;
+      const past = y < nowY || (y === nowY && m < nowM);
+      const real = mo && mo.hasData ? mo.end : null;
+      return { key, y, m, snap, mo, isCurrent, past, real };
+    })
+    .sort((a, b) => b.y - a.y || b.m - a.m);
   const avantSalaireData = monthsAll
     .filter(
       (mo) =>
@@ -502,6 +556,14 @@ export default function App() {
   const refunds = [...state.extras].filter((x) => x.refund).sort(byDateDesc);
   const patchExtra = (id, patch) =>
     setState((s) => ({ ...s, extras: s.extras.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+  // Édition en place des écritures planifiées (bouton ✏️) : corriger un
+  // libellé, un montant ou un jour sans supprimer/recréer la ligne.
+  const patchExpense = (id, patch) =>
+    setState((s) => ({ ...s, expenses: s.expenses.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+  const patchIncome = (id, patch) =>
+    setState((s) => ({ ...s, incomes: s.incomes.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+  // Ligne en cours d'édition : { type: "expense" | "income", id }
+  const [editing, setEditing] = useState(null);
   const addIncome = (i) => setState((s) => ({ ...s, incomes: [...s.incomes, i] }));
   const delIncome = (id) => setState((s) => ({ ...s, incomes: s.incomes.filter((x) => x.id !== id) }));
   const setBudget = (cat, n) => setState((s) => ({ ...s, budgets: { ...s.budgets, [cat]: n } }));
@@ -744,6 +806,22 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto max-w-6xl px-4 py-6">
+        {saveError && (
+          <div className="mb-4 flex items-start justify-between gap-3 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            <div>
+              <span className="font-semibold">⚠️ Impossible d'enregistrer vos données.</span>{" "}
+              Le stockage du navigateur est plein ou bloqué — vos modifications de cette session ne seront pas conservées.
+              Exportez une sauvegarde depuis 🛠️ Admin → 💾 (et dégagez de l'espace ou quittez le mode privé).
+            </div>
+            <button
+              className="shrink-0 rounded-md px-2 py-1 text-rose-500 hover:bg-rose-100"
+              onClick={() => setSaveError(null)}
+              title="Masquer (réapparaîtra au prochain échec)"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         {/* En-tête */}
         <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -845,20 +923,33 @@ export default function App() {
         {/* ------------------------------ APERÇU ------------------------------ */}
         {tab === "apercu" && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-8">
+            {/* KPI regroupés : situation réelle du mois chargé, puis projection.
+                Même code couleur partout : vert = positif, rouge = négatif. */}
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Réalisé — {sim.label}
+              </div>
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
               <Kpi label="Solde en début de mois" value={fmt(sim.start)} />
               <Kpi label="Revenus du mois" value={"+ " + fmt(sim.totalIn)} tone="good" />
               <Kpi label="Dépenses du mois" value={"− " + fmt(sim.totalOut)} tone="bad" />
               <Kpi
                 label="Solde actuel"
                 value={fmt(soldeActuel)}
-                tone={soldeActuel >= 0 ? "accent" : "bad"}
+                tone={soldeActuel >= 0 ? "good" : "bad"}
                 hint={isCurrentMonth ? "aujourd'hui" : "au " + now.getDate() + " " + MONTHS[sim.m].toLowerCase()}
               />
+              </div>
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Projection — {sim.label}
+              </div>
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
               <Kpi
                 label="Solde fin de mois"
                 value={fmt(sim.end)}
-                tone={sim.end >= 0 ? "accent" : "bad"}
+                tone={sim.end >= 0 ? "good" : "bad"}
                 hint={sim.end >= sim.start ? "Évolution : + " + fmt(sim.end - sim.start) : "Évolution : − " + fmt(sim.start - sim.end)}
               />
               <Kpi
@@ -880,7 +971,7 @@ export default function App() {
               <Kpi
                 label="Solde fin de mois probable"
                 value={fmt(sim.end - prov.total)}
-                tone={sim.end - prov.total >= 0 ? "accent" : "bad"}
+                tone={sim.end - prov.total >= 0 ? "good" : "bad"}
                 hint={
                   prov.total > 0
                     ? "Habitudes non planifiées : − " + fmt(prov.total)
@@ -904,7 +995,69 @@ export default function App() {
                         : "")
                 }
               />
+              </div>
             </div>
+
+            {snapEntries.length > 0 && (
+              <Card
+                title={
+                  <div className="flex flex-1 flex-wrap items-baseline justify-between gap-2">
+                    <h2 className="font-semibold">Historique des prévisions ({snapEntries.length})</h2>
+                    <span className="text-xs font-normal text-slate-500">
+                      Ce que le modèle annonçait au premier affichage de chaque mois
+                    </span>
+                  </div>
+                }
+              >
+                <p className="mb-3 text-xs text-slate-500">
+                  Au premier affichage d'un mois, l'application conserve un instantané de sa prévision du moment
+                  (fin de mois probable et solde avant salaire), jamais écrasé ensuite. Une fois le mois réel
+                  chargé, l'écart entre l'annonce et le réel s'affiche ici.
+                </p>
+                <div className="space-y-2">
+                  {snapEntries.map(({ key, y, m, snap, mo, isCurrent, past, real }) => {
+                    const ecart = real != null ? real - snap.probable : null;
+                    const dateCap = new Date(snap.savedAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+                    return (
+                      <div key={key} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                        <div className="min-w-0">
+                          <span className="font-medium">{MONTHS[m]} {y}</span>
+                          <div className="text-xs text-slate-500">
+                            Prévu le {dateCap} : fin de mois probable <span className="font-medium text-slate-700">{fmt(snap.probable)}</span>
+                            {snap.avant != null && (
+                              <> · avant salaire <span className="font-medium text-slate-700">{fmt(snap.avant)}</span></>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right text-xs">
+                          {isCurrent ? (
+                            <span className="text-slate-500">
+                              En cours — estimation actuelle :{" "}
+                              <span className="font-medium text-slate-700">
+                                {mo ? fmt(mo.end - provTotalOf(y, m, now.getDate())) : "—"}
+                              </span>
+                            </span>
+                          ) : past ? (
+                            real != null ? (
+                              <span className="text-slate-500">
+                                Réel : <span className="font-medium text-slate-900">{fmt(real)}</span>{" "}
+                                <span className={"font-semibold " + (ecart >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                                  ({ecart >= 0 ? "+" : "−"} {fmt(Math.abs(ecart))})
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">Mois écoulé non chargé (importez le relevé pour comparer)</span>
+                            )
+                          ) : (
+                            <span className="text-slate-400">À venir</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            )}
 
             <Card
               title={
@@ -1101,6 +1254,19 @@ export default function App() {
                     const c = taxCat(e.cat, taxo);
                     const s = taxSub(e.cat, e.sub, taxo);
                     const env = ENVELOPPES.find((x) => x.id === envelopeOf(e.cat, e.sub, taxo));
+                    if (editing?.type === "expense" && editing.id === e.id) {
+                      return (
+                        <ExpenseEditRow
+                          key={e.id}
+                          entry={e}
+                          onSave={(patch) => {
+                            patchExpense(e.id, patch);
+                            setEditing(null);
+                          }}
+                          onCancel={() => setEditing(null)}
+                        />
+                      );
+                    }
                     return (
                       <div key={e.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
                         <div className="min-w-0">
@@ -1119,6 +1285,13 @@ export default function App() {
                         </div>
                         <div className="flex items-center gap-3">
                           <span className="font-semibold text-rose-600">− {fmt(e.amount)}</span>
+                          <button
+                            className="rounded-md px-2 py-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                            onClick={() => setEditing({ type: "expense", id: e.id })}
+                            title="Modifier (libellé, montant, jour, fréquence)"
+                          >
+                            ✏️
+                          </button>
                           <button
                             className="rounded-md px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
                             onClick={() => delExpense(e.id)}
@@ -1275,7 +1448,21 @@ export default function App() {
                     if (ua !== ub) return ub - ua; // datées d'abord, récurrentes ensuite
                     return ua ? (b.y - a.y) || (b.m - a.m) || ((b.day ?? 0) - (a.day ?? 0)) : 0;
                   })
-                  .map((i) => (
+                  .map((i) => {
+                  if (editing?.type === "income" && editing.id === i.id) {
+                    return (
+                      <IncomeEditRow
+                        key={i.id}
+                        entry={i}
+                        onSave={(patch) => {
+                          patchIncome(i.id, patch);
+                          setEditing(null);
+                        }}
+                        onCancel={() => setEditing(null)}
+                      />
+                    );
+                  }
+                  return (
                   <div key={i.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
                     <div className="min-w-0">
                       <div className="text-sm font-medium">{i.label}</div>
@@ -1304,6 +1491,13 @@ export default function App() {
                     <div className="flex items-center gap-3">
                       <span className="font-semibold text-emerald-600">+ {fmt(i.amount)}</span>
                       <button
+                        className="rounded-md px-2 py-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                        onClick={() => setEditing({ type: "income", id: i.id })}
+                        title="Modifier (libellé, montant, jour)"
+                      >
+                        ✏️
+                      </button>
+                      <button
                         className="rounded-md px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
                         onClick={() => delIncome(i.id)}
                         title="Supprimer"
@@ -1312,7 +1506,8 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 {state.incomes.length === 0 && (
                   <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
                     Aucun revenu enregistré.
@@ -1337,8 +1532,12 @@ export default function App() {
                 {ENVELOPPES.map((c) => {
                   const planned = byEnv[c.id] ?? 0;
                   const budget = state.budgets[c.id] ?? 0;
+                  // Sans enveloppe renseignée (0 €), « Dépassé de X € » n'a pas
+                  // de sens : ce n'est pas un dépassement, juste l'absence
+                  // d'objectif. Libellé neutre dans ce cas.
+                  const noEnvelope = budget <= 0;
                   const pct = budget > 0 ? Math.min(100, (planned / budget) * 100) : planned > 0 ? 100 : 0;
-                  const over = planned > budget;
+                  const over = !noEnvelope && planned > budget;
                   const detail = detailOf(c.id);
                   return (
                     <div key={c.id}>
@@ -1349,6 +1548,11 @@ export default function App() {
                           {over && (
                             <span className="rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-600">
                               Dépassé de {fmt(planned - budget)}
+                            </span>
+                          )}
+                          {!over && noEnvelope && planned > 0 && (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+                              Pas d'enveloppe définie
                             </span>
                           )}
                         </div>
@@ -1768,6 +1972,111 @@ function recurrencesBySub(expenses) {
     map.set(k, cur);
   }
   return map;
+}
+
+// ----- Édition en place d'une écriture planifiée (bouton ✏️) -----
+// Formulaire inline : corriger libellé, montant, jour, fréquence sans
+// supprimer/recréer la ligne (l'historique des occurrences est conservé).
+function ExpenseEditRow({ entry, onSave, onCancel }) {
+  const [label, setLabel] = useState(entry.label);
+  const [amount, setAmount] = useState(entry.amount);
+  const [day, setDay] = useState(entry.day);
+  const [freq, setFreq] = useState(entry.freq ?? "mensuelle");
+  const [month, setMonth] = useState(entry.month ?? 1);
+  const valid = Boolean(label.trim()) && amount > 0;
+  return (
+    <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 px-3 py-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Field label="Libellé">
+          <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} />
+        </Field>
+        <Field label="Montant (€)">
+          <NumInput value={amount} onChange={setAmount} />
+        </Field>
+        <Field label="Jour du mois (1–31)">
+          <NumInput value={day} onChange={(n) => setDay(n)} />
+        </Field>
+        <Field label="Fréquence">
+          <select className={inputCls} value={freq} onChange={(e) => setFreq(e.target.value)}>
+            <option value="mensuelle">Mensuelle</option>
+            <option value="annuelle">Annuelle</option>
+          </select>
+        </Field>
+        {freq === "annuelle" && (
+          <Field label="Mois">
+            <select className={inputCls} value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+              {MONTHS.map((mo, idx) => (
+                <option key={mo} value={idx + 1}>{mo}</option>
+              ))}
+            </select>
+          </Field>
+        )}
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40"
+          disabled={!valid}
+          onClick={() =>
+            onSave({
+              label: label.trim(),
+              amount,
+              day: Math.min(31, Math.max(1, Math.round(day || 1))),
+              freq,
+              month: freq === "annuelle" ? month : undefined,
+            })
+          }
+        >
+          ✓ Valider
+        </button>
+        <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100" onClick={onCancel}>
+          Annuler
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Édition d'une entrée d'argent : le jour n'est éditable que pour les modes
+// « fixe » et « unique » (le salaire suit l'avant-veille du dernier jour ouvré).
+function IncomeEditRow({ entry, onSave, onCancel }) {
+  const [label, setLabel] = useState(entry.label);
+  const [amount, setAmount] = useState(entry.amount);
+  const [day, setDay] = useState(entry.day ?? 1);
+  const hasDay = entry.mode !== "salaire";
+  const valid = Boolean(label.trim()) && amount > 0;
+  return (
+    <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 px-3 py-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Field label="Libellé">
+          <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} />
+        </Field>
+        <Field label="Montant (€)">
+          <NumInput value={amount} onChange={setAmount} />
+        </Field>
+        {hasDay && (
+          <Field label="Jour du mois (1–31)">
+            <NumInput value={day} onChange={setDay} />
+          </Field>
+        )}
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40"
+          disabled={!valid}
+          onClick={() => {
+            const patch = { label: label.trim(), amount };
+            if (hasDay) patch.day = Math.min(31, Math.max(1, Math.round(day || 1)));
+            onSave(patch);
+          }}
+        >
+          ✓ Valider
+        </button>
+        <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100" onClick={onCancel}>
+          Annuler
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function ExpenseForm({ expenses = [], onAdd, taxo = TAXONOMIE }) {
