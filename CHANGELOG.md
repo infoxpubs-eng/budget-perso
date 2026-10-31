@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.10] — 2026-10-31
+
+### Corrigé
+
+- **Ligne rouge « estimation initiale » invisible** : Recharts ignore silencieusement un `Line` imbriqué dans un `AreaChart` (il n'accepte que des `Area`) — seules restaient visibles les lignes de référence (dont la ligne rouge du 0 €). Le graphique « Évolution du solde » utilise désormais un `ComposedChart`, prévu pour superposer une aire et une ligne : la trajectoire rouge pointillée s'affiche maintenant réellement.
+
 ## [0.30.9] — 2026-10-31
 
 ### Modifié

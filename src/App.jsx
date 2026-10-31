@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer,
-  AreaChart,
   Area,
   BarChart,
   Bar,
   Cell,
+  ComposedChart,
   LineChart,
   Line,
   XAxis,
@@ -837,7 +837,7 @@ export default function App() {
               </p>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={dailyCompare} margin={{ top: 10, right: 16, bottom: 4, left: 8 }}>
+                  <ComposedChart data={dailyCompare} margin={{ top: 10, right: 16, bottom: 4, left: 8 }}>
                     <defs>
                       <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
@@ -865,7 +865,7 @@ export default function App() {
                     {simEst && (
                       <Line type="monotone" dataKey="est" stroke="#f43f5e" strokeWidth={2} strokeDasharray="5 4" dot={false} />
                     )}
-                  </AreaChart>
+                  </ComposedChart>
                 </ResponsiveContainer>
               </div>
             </Card>
