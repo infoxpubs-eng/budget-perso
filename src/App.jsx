@@ -55,7 +55,7 @@ import {
   setSubActive,
 } from "./lib/taxonomie.js";
 import { parseCsv, rowsToEntries, applyTaxoAdditions, mergeHistory, mergeAddedLines, A_CLASSER } from "./lib/import-csv.js";
-import { remainingProvision, DEFAULT_ESTIMATION } from "./lib/estimation.js";
+import { remainingProvision, provisionShare, DEFAULT_ESTIMATION } from "./lib/estimation.js";
 
 /* ============================== Données initiales ============================== */
 
@@ -242,6 +242,21 @@ function SimpleTooltip({ active, payload, label }) {
   );
 }
 
+function YearTooltip({ active, payload, label }) {
+  if (!active || !payload || !payload.length) return null;
+  const get = (k) => payload.find((p) => p.dataKey === k)?.value;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg text-xs">
+      <div className="font-semibold text-slate-600">{label}</div>
+      <div className="mt-1 font-bold text-slate-900">Fin de mois (planifié) : {fmt(get("solde"))}</div>
+      {get("probable") != null && (
+        <div className="mt-0.5 font-semibold text-emerald-600">Probable (habitudes incluses) : {fmt(get("probable"))}</div>
+      )}
+      {get("bas") != null && <div className="mt-0.5 text-amber-600">Point bas : {fmt(get("bas"))}</div>}
+    </div>
+  );
+}
+
 function AvantSalaireTooltip({ active, payload, label }) {
   if (!active || !payload || !payload.length || payload[0].value == null) return null;
   const v = payload[0].value;
@@ -422,6 +437,27 @@ export default function App() {
   const nowY = now.getFullYear();
   const nowM = now.getMonth();
   const nextMois = new Date(nowY, nowM + 1, 1);
+  // Projection « probable » : l'échéancier planifié ne contient pas les
+  // habitudes non planifiées (courses, alimentation…). Provision
+  // d'habitudes d'un mois — pleine pour un mois futur, restante (au
+  // prorata des jours) pour le mois courant — puis part consommée à la
+  // veille du jour de paie. Les mois réellement chargés (historique)
+  // ne sont pas ajustés : leurs flux sont réels.
+  const est = state.estimation ?? DEFAULT_ESTIMATION;
+  const provTotalOf = (y, m, today = null) =>
+    remainingProvision({ extras: state.extras, expenses: state.expenses, y, m, settings: est, taxo: state.taxonomie, today }).total;
+  const beforeSalaryProbableOf = (mo) => {
+    const d = salaryDayOf(mo.y, mo.m);
+    const avant = beforeSalaryOf(mo);
+    if (!d || avant == null) return avant;
+    const isCurrent = mo.y === nowY && mo.m === nowM;
+    if (mo.hasData && !isCurrent) return avant;
+    const part = provisionShare({ y: mo.y, m: mo.m, day: d, today: isCurrent ? now.getDate() : null });
+    if (part <= 0) return avant;
+    return avant - provTotalOf(mo.y, mo.m, isCurrent ? now.getDate() : null) * part;
+  };
+  const avantSalaireProbable = beforeSalaryProbableOf(sim);
+  const provAvantSalaire = avantSalaire === null || avantSalaireProbable == null ? 0 : avantSalaire - avantSalaireProbable;
   const avantSalaireData = monthsAll
     .filter(
       (mo) =>
@@ -429,7 +465,17 @@ export default function App() {
         (mo.y === nowY && mo.m === nowM) ||
         (mo.y === nextMois.getFullYear() && mo.m === nextMois.getMonth())
     )
-    .map((mo) => ({ label: mo.label, avant: beforeSalaryOf(mo), reel: !!mo.hasData }));
+    .map((mo) => {
+      const isCurrent = mo.y === nowY && mo.m === nowM;
+      return {
+        label: mo.label,
+        // Mois en cours et mois suivant : version PROBABLE (planifié +
+        // habitudes estimées jusqu'à la veille de la paie) ; historique
+        // chargé : flux réels, rien à estimer.
+        avant: mo.hasData && !isCurrent ? beforeSalaryOf(mo) : beforeSalaryProbableOf(mo),
+        reel: !!mo.hasData,
+      };
+    });
 
   // Estimation initiale du mois affiché : l'échéancier planifié SEUL (aucun
   // flux réel) sur le même solde d'ouverture — la prévision telle qu'elle
@@ -656,14 +702,21 @@ export default function App() {
       flux: d.events.reduce((a, e) => a + e.amount, 0),
     }));
 
-  const yearData = sims.map((s) => ({ label: s.label, solde: s.end, bas: s.min }));
+  // Version « probable » sur 12 mois : la ligne bleue ne contient que le
+  // planifié ; la verte retranche en plus les habitudes non planifiées —
+  // au prorata des jours restants pour le mois courant, en plein ensuite.
+  const yearData = sims.map((s) => ({
+    label: s.label,
+    solde: s.end,
+    probable: s.end - provTotalOf(s.y, s.m, s.y === nowY && s.m === nowM ? now.getDate() : null),
+    bas: s.min,
+  }));
   const echeancier = useMemo(() => recurringSchedule(state, sim.y, sim.m), [state, sim]);
   const recTotals = useMemo(() => recurringMonthTotals(state, sim.y, sim.m), [state, sim]);
   // Provision « habitudes non planifiées » du mois affiché : tendances des
   // couples sans écriture planifiée, moins ce qui est déjà dépensé.
   // Réglages du modèle (fenêtre, seuil de présence, statistique) : persistés
   // avec l'état, éditables dans la console 🛠️ Admin.
-  const est = state.estimation ?? DEFAULT_ESTIMATION;
   // Prorata du mois courant : la provision restante suit les jours restants,
   // pas l'enveloppe mensuelle entière (sinon le « solde probable » du 30 du
   // mois retrancherait ~1 500 € d'habitudes comme s'il restait un mois entier.
@@ -838,14 +891,17 @@ export default function App() {
               />
               <Kpi
                 label="Solde avant salaire"
-                value={avantSalaire === null ? "—" : fmt(avantSalaire)}
-                tone={avantSalaire === null ? undefined : avantSalaire >= 0 ? "good" : "bad"}
+                value={avantSalaireProbable === null ? "—" : fmt(avantSalaireProbable)}
+                tone={avantSalaireProbable === null ? undefined : avantSalaireProbable >= 0 ? "good" : "bad"}
                 hint={
-                  avantSalaire === null
+                  avantSalaireProbable === null
                     ? "Aucun salaire ni revenu à jour fixe planifié"
-                    : avantSalaire >= 0
+                    : (avantSalaireProbable >= 0
                       ? "Veille du salaire du " + salJour + " " + MONTHS[sim.m].toLowerCase() + " — le mois tient sur ses recettes, le salaire arrive en boni"
-                      : "Découvert avant même le salaire du " + salJour + " " + MONTHS[sim.m].toLowerCase() + " — les dépenses ont dépassé les recettes"
+                      : "Découvert avant même le salaire du " + salJour + " " + MONTHS[sim.m].toLowerCase() + " — les dépenses ont dépassé les recettes") +
+                      (provAvantSalaire > 0
+                        ? " · habitudes estimées jusqu'à la paie : − " + fmt(provAvantSalaire)
+                        : "")
                 }
               />
             </div>
@@ -950,6 +1006,7 @@ export default function App() {
                   Enchaînement des mois à partir de {monthLabel(anchor.y, anchor.m)} avec le solde de départ de {fmt(state.soldeDepart)}
                   {hist.months.length > 0 && <> ; historique enchaîné jusqu'à {monthLabel(start.y, start.m)} (ouverture : {fmt(sims[0].start)})</>}.
                   <span className="text-amber-600"> Point bas du mois en pointillés : il suit les dates des prélèvements récurrents 🔁, stables d'un mois sur l'autre.</span>
+                  <span className="text-emerald-600"> Ligne verte pointillée : version « probable », habitudes non planifiées estimées incluses — la bleue ne compte que le planifié.</span>
                 </p>
                 <div className="h-60">
                   <ResponsiveContainer width="100%" height="100%">
@@ -957,7 +1014,7 @@ export default function App() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} tickFormatter={(v) => MONTHS_SHORT[MONTHS.indexOf(v.split(" ")[0])] ?? v.split(" ")[0]} />
                       <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => Math.round(v / 100) / 10 + "k€"} width={48} />
-                      <Tooltip content={<SimpleTooltip />} />
+                      <Tooltip content={<YearTooltip />} />
                       <ReferenceLine y={0} stroke="#f43f5e" strokeDasharray="4 4" />
                       <Line
                         type="monotone"
@@ -976,6 +1033,14 @@ export default function App() {
                       />
                       <Line
                         type="monotone"
+                        dataKey="probable"
+                        stroke="#10b981"
+                        strokeWidth={2}
+                        strokeDasharray="6 3"
+                        dot={false}
+                      />
+                      <Line
+                        type="monotone"
                         dataKey="bas"
                         stroke="#f59e0b"
                         strokeWidth={1.5}
@@ -990,8 +1055,9 @@ export default function App() {
               <Card title={<h2 className="font-semibold">Solde avant salaire (historique + mois en cours et suivant)</h2>}>
                 <p className="mb-3 text-xs text-slate-500">
                   Balance du compte à la veille du jour de paie, mois après mois. Barre pleine = mois chargé
-                  (flux réels), barre estompée = simulation (mois en cours et le suivant) ; rouge = le salaire
-                  tombe sur un découvert. La tendance monte quand les économies portent leurs fruits.
+                  (flux réels), barre estompée = simulation probable (mois en cours et le suivant : planifié
+                  + habitudes estimées jusqu'à la paie) ; rouge = le salaire tombe sur un découvert.
+                  La tendance monte quand les économies portent leurs fruits.
                 </p>
                 <div className="h-60">
                   <ResponsiveContainer width="100%" height="100%">

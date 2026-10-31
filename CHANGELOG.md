@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.31.5] — 2026-10-31
+
+### Ajouté
+
+- **Version « probable » des projections (habitudes incluses)** : l'échéancier planifié ne contient pas les habitudes non planifiées (courses, alimentation — jamais planifiée), les mois futurs donnaient donc une fausse assurance croissante. Trois ajouts : une **ligne verte pointillée « probable »** sur le graphique « Solde prévisionnel fin de mois (12 mois) » (bleue = planifié seul, verte = habitudes estimées en plus, au prorata des jours restants pour le mois courant, en plein pour les suivants — tooltip dédié) ; le **KPI « Solde avant salaire »** affiche désormais la version probable, retranchant la part d'habitudes consommée jusqu'à la veille de la paie (hint : « habitudes estimées jusqu'à la paie : − X € ») ; les **barres simulées du graphique « Solde avant salaire »** (mois en cours et suivant) passent en version probable. L'historique chargé reste sur les flux réels, sans ajustement. Le KPI « Solde fin de mois probable » incluait déjà les habitudes (aucun changement).
+
 ## [0.31.4] — 2026-10-31
 
 ### Ajouté

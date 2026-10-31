@@ -4,6 +4,7 @@ import {
   monthlySpendByCouple,
   coupleTendencies,
   remainingProvision,
+  provisionShare,
   normEstimation,
   meanOf,
   DEFAULT_ESTIMATION,
@@ -387,5 +388,25 @@ describe("remainingProvision — transferts internes", () => {
     ];
     const p = remainingProvision({ extras, expenses: [], y: 2026, m: 9, taxo });
     expect(p.total).toBe(0);
+  });
+});
+
+
+describe("provisionShare", () => {
+  it("mois futur : part du 1er à la veille du jour de paie (novembre = 30 jours, paie le 28)", () => {
+    expect(provisionShare({ y: 2026, m: 10, day: 28 })).toBeCloseTo(27 / 30, 5);
+  });
+
+  it("mois courant : part des jours restants seulement (aujourd'hui le 20, paie le 28)", () => {
+    expect(provisionShare({ y: 2026, m: 10, day: 28, today: 20 })).toBeCloseTo(7 / 10, 5);
+  });
+
+  it("jour de paie déjà passé : plus rien à provisionner", () => {
+    expect(provisionShare({ y: 2026, m: 10, day: 15, today: 20 })).toBe(0);
+  });
+
+  it("paramètres invalides : 0, sans crash", () => {
+    expect(provisionShare({})).toBe(0);
+    expect(provisionShare({ y: 2026, m: 10 })).toBe(0);
   });
 });

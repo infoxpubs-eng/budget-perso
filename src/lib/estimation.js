@@ -250,3 +250,23 @@ export function remainingProvision({ extras = [], expenses = [], y, m, settings 
   }
   return { lines, total };
 }
+
+/**
+ * Part de la provision d'habitudes consommée à la VEILLE du jour de paie :
+ * prorata linéaire des jours. Pour un mois futur (`today` absent), la part
+ * court du 1er à la veille de la paie ; pour le mois courant (`today` =
+ * jour écoulé 1-31), seulement des jours restants — le déjà-dépensé réel
+ * est déjà dans la trajectoire du solde. Jour de paie déjà passé : 0.
+ *
+ * @returns {number} part entre 0 et 1
+ */
+export function provisionShare({ y, m, day, today = null } = {}) {
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(day)) return 0;
+  const dim = daysInMonthOf(y, m);
+  if (dim <= 0 || day < 1) return 0;
+  const t = Number(today);
+  const from = Number.isFinite(t) && t >= 1 && t <= dim ? t : 0;
+  const days = Math.max(0, (day - 1) - from);
+  const span = from > 0 ? Math.max(0, dim - from) : dim;
+  return span > 0 ? Math.min(1, days / span) : 0;
+}
