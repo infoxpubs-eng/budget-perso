@@ -5,6 +5,16 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.31.4] — 2026-10-31
+
+### Ajouté
+
+- **Blocs repliables, repliés par défaut** : tous les blocs à titre — graphiques de l'Aperçu (évolution du solde, flux quotidien, solde prévisionnel 12 mois, solde avant salaire), listes de l'onglet Dépenses (planifiées, non planifiées, remboursements), Entrées d'argent, blocs Budget et Échéancier, blocs Admin (modèle prédictif, sauvegarde, nomenclature, ajout de couple) et formulaires d'ajout — se replient et se déplient d'un clic sur leur titre (chevron ▸/▾). Replié, un bloc garde ses informations clés visibles : nombre de lignes, total, point bas ou alerte de découvert. Les KPI de l'Aperçu et la fenêtre d'import du relevé restent toujours ouverts.
+
+### Modifié
+
+- **Tri du plus récent au plus ancien** : « Dépenses non planifiées » et « Remboursements » s'affichent désormais de la ligne la plus récente à la plus ancienne (les derniers mouvements — et les doublons éventuels — se lisent en tête de liste) ; dans « Entrées d'argent », les entrées datées (uniques) viennent en tête, de la plus récente à la plus ancienne, avant les récurrentes (salaire, montants fixes).
+
 ## [0.31.3] — 2026-10-31
 
 ### Ajouté

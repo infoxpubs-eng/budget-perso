@@ -83,10 +83,27 @@ const DEFAULT_STATE = migrateState({
 
 /* ============================== Composants UI ============================== */
 
-function Card({ children, className }) {
+function Card({ children, className, title }) {
+  const [open, setOpen] = useState(false);
   return (
     <div className={"rounded-xl border border-slate-200 bg-white p-4 shadow-sm " + (className ?? "")}>
-      {children}
+      {title === undefined ? (
+        children
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            className="mb-1 flex w-full items-center justify-between gap-3 text-left"
+          >
+            {title}
+            <span className={"text-lg leading-none " + (open ? "text-slate-600" : "text-slate-400")}>
+              {open ? "▾" : "▸"}
+            </span>
+          </button>
+          {open && children}
+        </>
+      )}
     </div>
   );
 }
@@ -432,11 +449,11 @@ export default function App() {
   const delExpense = (id) => setState((s) => ({ ...s, expenses: s.expenses.filter((x) => x.id !== id) }));
   const addExtra = (x) => setState((s) => ({ ...s, extras: [...s.extras, x] }));
   const delExtra = (id) => setState((s) => ({ ...s, extras: s.extras.filter((x) => x.id !== id) }));
-  // Remboursements ↩ (extras à montant négatif) : liste dédiée de l'onglet
-  // Dépenses, triée par date pour repérer les doublons côte à côte.
-  const refunds = [...state.extras]
-    .filter((x) => x.refund)
-    .sort((a, b) => a.y - b.y || a.m - b.m || (a.day ?? 0) - (b.day ?? 0));
+  // Extras datés, triés du PLUS RÉCENT au plus ancien : blocs « Dépenses
+  // non planifiées » et « Remboursements » de l'onglet Dépenses.
+  const byDateDesc = (a, b) => (b.y - a.y) || (b.m - a.m) || ((b.day ?? 0) - (a.day ?? 0));
+  const unplanned = [...state.extras].filter((x) => !x.refund).sort(byDateDesc);
+  const refunds = [...state.extras].filter((x) => x.refund).sort(byDateDesc);
   const patchExtra = (id, patch) =>
     setState((s) => ({ ...s, extras: s.extras.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
   const addIncome = (i) => setState((s) => ({ ...s, incomes: [...s.incomes, i] }));
@@ -833,19 +850,22 @@ export default function App() {
               />
             </div>
 
-            <Card>
-              <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="font-semibold">Évolution du solde — {sim.label}</h2>
-                {sim.min < 0 ? (
-                  <span className="rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600">
-                    ⚠️ Découvert prévu le {sim.minDay} {MONTHS[sim.m].toLowerCase()} ({fmt(sim.min)})
-                  </span>
-                ) : (
-                  <span className="text-xs text-slate-500">
-                    Point le plus bas : {fmt(sim.min)} le {sim.minDay} {MONTHS[sim.m].toLowerCase()}
-                  </span>
-                )}
-              </div>
+            <Card
+              title={
+                <div className="flex flex-1 flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-semibold">Évolution du solde — {sim.label}</h2>
+                  {sim.min < 0 ? (
+                    <span className="rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600">
+                      ⚠️ Découvert prévu le {sim.minDay} {MONTHS[sim.m].toLowerCase()} ({fmt(sim.min)})
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-500">
+                      Point le plus bas : {fmt(sim.min)} le {sim.minDay} {MONTHS[sim.m].toLowerCase()}
+                    </span>
+                  )}
+                </div>
+              }
+            >
               <p className="mb-3 text-xs text-slate-500">
                 Survolez le graphique pour voir les opérations débitées / créditées chaque jour (🔒 = incompressible).
                 {simEst && <> Ligne rouge pointillée : trajectoire prévue par l'échéancier planifié (aucun flux réel) — l'écart avec la ligne bleue montre ce que le réel a fait diverger.</>}
@@ -886,8 +906,7 @@ export default function App() {
             </Card>
 
             <div className="grid gap-6 lg:grid-cols-2">
-              <Card>
-                <h2 className="mb-1 font-semibold">Flux quotidien — {sim.label}</h2>
+              <Card title={<h2 className="font-semibold">Flux quotidien — {sim.label}</h2>}>
                 <p className="mb-3 text-xs text-slate-500">Opérations du jour : vert = entrées, rouge = sorties.</p>
                 <div className="h-60">
                   <ResponsiveContainer width="100%" height="100%">
@@ -926,8 +945,7 @@ export default function App() {
                 </div>
               </Card>
 
-              <Card>
-                <h2 className="mb-1 font-semibold">Solde prévisionnel fin de mois (12 mois)</h2>
+              <Card title={<h2 className="font-semibold">Solde prévisionnel fin de mois (12 mois)</h2>}>
                 <p className="mb-3 text-xs text-slate-500">
                   Enchaînement des mois à partir de {monthLabel(anchor.y, anchor.m)} avec le solde de départ de {fmt(state.soldeDepart)}
                   {hist.months.length > 0 && <> ; historique enchaîné jusqu'à {monthLabel(start.y, start.m)} (ouverture : {fmt(sims[0].start)})</>}.
@@ -969,8 +987,7 @@ export default function App() {
                 </div>
               </Card>
 
-              <Card>
-                <h2 className="mb-1 font-semibold">Solde avant salaire (historique + mois en cours et suivant)</h2>
+              <Card title={<h2 className="font-semibold">Solde avant salaire (historique + mois en cours et suivant)</h2>}>
                 <p className="mb-3 text-xs text-slate-500">
                   Balance du compte à la veille du jour de paie, mois après mois. Barre pleine = mois chargé
                   (flux réels), barre estompée = simulation (mois en cours et le suivant) ; rouge = le salaire
@@ -1012,8 +1029,7 @@ export default function App() {
         {tab === "depenses" && (
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="space-y-6 lg:col-span-2">
-              <Card>
-                <h2 className="mb-3 font-semibold">Dépenses planifiées ({state.expenses.length})</h2>
+              <Card title={<h2 className="font-semibold">Dépenses planifiées ({state.expenses.length})</h2>}>
                 <div className="space-y-2">
                   {state.expenses.map((e) => {
                     const c = taxCat(e.cat, taxo);
@@ -1056,17 +1072,14 @@ export default function App() {
                 </div>
               </Card>
 
-              <Card>
-                <h2 className="mb-1 font-semibold">
-                  Dépenses non planifiées ({state.extras.filter((x) => !x.refund).length})
-                </h2>
+              <Card title={<h2 className="font-semibold">Dépenses non planifiées ({unplanned.length})</h2>}>
                 <p className="mb-3 text-xs text-slate-500">
                   Dépenses unitaires, à une date précise : vie courante (l'enveloppe de leur catégorie) ou
                   one-shot — ponctuelles, à durée limitée (enveloppe « Exceptionnelles », exclues des habitudes).
                   Les remboursements ↩ sont listés à part, dans le bloc dédié ci-dessous.
                 </p>
                 <div className="space-y-2">
-                  {state.extras.filter((x) => !x.refund).map((x) => {
+                  {unplanned.map((x) => {
                     const c = taxCat(x.cat, taxo);
                     const s = taxSub(x.cat, x.sub, taxo);
                     const shot = extraOneShot(x, taxo);
@@ -1119,11 +1132,14 @@ export default function App() {
                 </div>
               </Card>
 
-              <Card>
-                <h2 className="mb-1 font-semibold">
-                  Remboursements ({refunds.length}) — total{" "}
-                  <span className="text-emerald-600">+ {fmt(refunds.reduce((a, x) => a + Math.abs(x.amount), 0))}</span>
-                </h2>
+              <Card
+                title={
+                  <h2 className="font-semibold">
+                    Remboursements ({refunds.length}) — total{" "}
+                    <span className="text-emerald-600">+ {fmt(refunds.reduce((a, x) => a + Math.abs(x.amount), 0))}</span>
+                  </h2>
+                }
+              >
                 <p className="mb-3 text-xs text-slate-500">
                   Crédits arrivés sur des couples de dépense : comptés en dépenses en moins (↩), jamais comme
                   revenus. Triés du plus ancien au plus récent — deux lignes identiques à la même date signalent
@@ -1181,13 +1197,19 @@ export default function App() {
         {/* ------------------------------ REVENUS ------------------------------ */}
         {tab === "revenus" && (
           <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
-              <h2 className="mb-1 font-semibold">Entrées d'argent ({state.incomes.length})</h2>
+            <Card className="lg:col-span-2" title={<h2 className="font-semibold">Entrées d'argent ({state.incomes.length})</h2>}>
               <p className="mb-3 text-xs text-slate-500">
                 Les salaires sont versés l'avant-veille du dernier jour ouvré du mois — ce mois-ci : le {salaryPayDay(sim.y, sim.m)} {MONTHS[sim.m].toLowerCase()}.
               </p>
               <div className="space-y-2">
-                {state.incomes.map((i) => (
+                {[...state.incomes]
+                  .sort((a, b) => {
+                    const ua = a.mode === "unique" ? 1 : 0;
+                    const ub = b.mode === "unique" ? 1 : 0;
+                    if (ua !== ub) return ub - ua; // datées d'abord, récurrentes ensuite
+                    return ua ? (b.y - a.y) || (b.m - a.m) || ((b.day ?? 0) - (a.day ?? 0)) : 0;
+                  })
+                  .map((i) => (
                   <div key={i.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
                     <div className="min-w-0">
                       <div className="text-sm font-medium">{i.label}</div>
@@ -1240,8 +1262,7 @@ export default function App() {
         {/* ------------------------------ BUDGET ------------------------------ */}
         {tab === "budget" && (
           <div className="space-y-6">
-            <Card>
-              <h2 className="mb-1 font-semibold">Budget prévisionnel — {sim.label}</h2>
+            <Card title={<h2 className="font-semibold">Budget prévisionnel — {sim.label}</h2>}>
               <p className="mb-4 text-xs text-slate-500">
                 Comparez l'enveloppe que vous souhaitez consacrer à chaque type de dépenses avec le total réellement planifié ce mois-ci (récurrentes + non planifiées).
                 Les dépenses sont rangées automatiquement par catégorie bancaire.
@@ -1300,8 +1321,7 @@ export default function App() {
             </Card>
 
             <div className="grid gap-6 lg:grid-cols-2">
-              <Card>
-                <h2 className="mb-1 font-semibold">Incompressible vs discrétionnaire — {sim.label}</h2>
+              <Card title={<h2 className="font-semibold">Incompressible vs discrétionnaire — {sim.label}</h2>}>
                 <p className="mb-4 text-xs text-slate-500">
                   Les dépenses incompressibles (🔒) sont celles que vous ne pouvez pas reporter ni réduire.
                 </p>
@@ -1331,8 +1351,7 @@ export default function App() {
                 </div>
               </Card>
 
-              <Card>
-                <h2 className="mb-3 font-semibold">Répartition des dépenses du mois par enveloppe</h2>
+              <Card title={<h2 className="font-semibold">Répartition des dépenses du mois par enveloppe</h2>}>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
@@ -1359,13 +1378,16 @@ export default function App() {
         {/* ------------------------------ ÉCHÉANCIER ------------------------------ */}
         {tab === "echeancier" && (
           <div className="space-y-6">
-            <Card>
-              <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="font-semibold">Échéancier récurrent 🔁 — {sim.label}</h2>
-                <span className="text-xs text-slate-500">
-                  {recTotals.days} jour(s) d'échéance · {recTotals.count} opération(s) · débits − {fmt(recTotals.totalOut)} · crédits + {fmt(recTotals.totalIn)}
-                </span>
-              </div>
+            <Card
+              title={
+                <div className="flex flex-1 flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-semibold">Échéancier récurrent 🔁 — {sim.label}</h2>
+                  <span className="text-xs text-slate-500">
+                    {recTotals.days} jour(s) d'échéance · {recTotals.count} opération(s) · débits − {fmt(recTotals.totalOut)} · crédits + {fmt(recTotals.totalIn)}
+                  </span>
+                </div>
+              }
+            >
               <p className="mb-3 text-xs text-slate-500">
                 Seuls les couples marqués « récurrente 🔁 » dans la nomenclature (console 🛠️ Admin)
                 y figurent : ce sont eux qui dessinent la trajectoire du solde et les point bas des
@@ -1397,11 +1419,14 @@ export default function App() {
               </div>
             </Card>
 
-            <Card>
-              <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="font-semibold">Habitudes non planifiées — provision restante</h2>
-                <span className="text-xs font-semibold text-rose-600">− {fmt(prov.total)}</span>
-              </div>
+            <Card
+              title={
+                <div className="flex flex-1 flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-semibold">Habitudes non planifiées — provision restante</h2>
+                  <span className="text-xs font-semibold text-rose-600">− {fmt(prov.total)}</span>
+                </div>
+              }
+            >
               <p className="mb-3 text-xs text-slate-500">
                 Tendance par couple sans écriture planifiée, apprise des relevés importés :
                 {est.stat === "moyenne" ? "moyenne" : "médiane"} des mois observés sur une fenêtre de {est.window} mois complets
@@ -1434,8 +1459,7 @@ export default function App() {
             </Card>
 
             <div className="grid gap-6 lg:grid-cols-2">
-              <Card>
-                <h2 className="mb-1 font-semibold">Calendrier type des récurrents</h2>
+              <Card title={<h2 className="font-semibold">Calendrier type des récurrents</h2>}>
                 <p className="mb-3 text-xs text-slate-500">
                   Paiements et revenus des couples marqués 🔁, à leurs dates habituelles
                   (les mois courts ramènent le jour 31 en fin de mois). Marquez une sous-catégorie
@@ -1480,8 +1504,7 @@ export default function App() {
                 </div>
               </Card>
 
-              <Card>
-                <h2 className="mb-1 font-semibold">12 mois — échéances récurrentes et point bas</h2>
+              <Card title={<h2 className="font-semibold">12 mois — échéances récurrentes et point bas</h2>}>
                 <p className="mb-3 text-xs text-slate-500">
                   Pour chaque mois simulé : débits et crédits récurrents uniquement, puis point bas de la trajectoire (suivant ces dates stables) et solde en fin de mois.
                 </p>
@@ -1727,8 +1750,7 @@ function ExpenseForm({ expenses = [], onAdd, taxo = TAXONOMIE }) {
   };
 
   return (
-    <Card>
-      <h2 className="mb-3 font-semibold">Ajouter une dépense récurrente</h2>
+    <Card title={<h2 className="font-semibold">Ajouter une dépense récurrente</h2>}>
       <div className="space-y-3">
         <Field label="Libellé">
           <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex. Loyer" />
@@ -1864,8 +1886,7 @@ function ExtraForm({ sims, monthIdx, expenses = [], onAdd, taxo = TAXONOMIE }) {
   };
 
   return (
-    <Card>
-      <h2 className="mb-1 font-semibold">Ajouter une dépense non planifiée</h2>
+    <Card title={<h2 className="font-semibold">Ajouter une dépense non planifiée</h2>}>
       <p className="mb-3 text-xs text-slate-500">Dépense unitaire, une seule fois, à une date précise.</p>
       <div className="space-y-3">
         <Field label="Libellé">
@@ -1972,8 +1993,7 @@ function IncomeForm({ sims, monthIdx, onAdd, taxo = TAXONOMIE }) {
   };
 
   return (
-    <Card>
-      <h2 className="mb-3 font-semibold">Ajouter une entrée d'argent</h2>
+    <Card title={<h2 className="font-semibold">Ajouter une entrée d'argent</h2>}>
       <div className="space-y-3">
         <Field label="Libellé">
           <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex. Salaire" />
@@ -2185,8 +2205,7 @@ function AdminPanel({ state, setState, prov, simLabel, exportData }) {
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
-        <Card>
-          <h2 className="mb-1 font-semibold">Modèle prédictif — habitudes non planifiées</h2>
+        <Card title={<h2 className="font-semibold">Modèle prédictif — habitudes non planifiées</h2>}>
           <p className="mb-4 text-xs text-slate-500">
             Réglages de la provision qui retranche le KPI « Solde fin de mois probable » (onglet
             Aperçu) : fenêtre d'apprentissage (mois complets, zéros inclus), présence minimale
@@ -2225,8 +2244,7 @@ function AdminPanel({ state, setState, prov, simLabel, exportData }) {
           </div>
         </Card>
 
-        <Card>
-          <h2 className="mb-1 font-semibold">💾 Sauvegarde & restauration</h2>
+        <Card title={<h2 className="font-semibold">💾 Sauvegarde & restauration</h2>}>
           <p className="mb-4 text-xs text-slate-500">
             Toutes vos données et réglages vivent uniquement dans le stockage de ce navigateur : en cas
             de problème sur votre appareil (perte, réinitialisation, données de navigation effacées),
@@ -2261,8 +2279,7 @@ function AdminPanel({ state, setState, prov, simLabel, exportData }) {
           </div>
         </Card>
 
-        <Card>
-          <h2 className="mb-1 font-semibold">Nomenclature — catégories et sous-catégories</h2>
+        <Card title={<h2 className="font-semibold">Nomenclature — catégories et sous-catégories</h2>}>
           <p className="mb-4 text-xs text-slate-500">
             Cliquez sur 🔁, 🔒, ⇄ ou one-shot pour marquer une sous-catégorie récurrente, incompressible, transfert ou
             « transfert interne » (virement d'épargne : les mouvements du couple comptent dans le
@@ -2442,8 +2459,7 @@ function AdminPanel({ state, setState, prov, simLabel, exportData }) {
       </div>
 
       <div className="space-y-6">
-        <Card>
-          <h2 className="mb-1 font-semibold">Ajouter un couple (catégorie · sous-catégorie)</h2>
+        <Card title={<h2 className="font-semibold">Ajouter un couple (catégorie · sous-catégorie)</h2>}>
           <p className="mb-3 text-xs text-slate-500">
             La nouvelle sous-catégorie est immédiatement disponible dans les formulaires et
             l'import CSV.
