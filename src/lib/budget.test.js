@@ -275,6 +275,50 @@ describe("migrateState", () => {
     expect(s.extras[0].amount).toBe(-120.87);
     expect(s.extras[0].refund).toBe(true);
   });
+
+  it("v0.31.2 : absorbe le revenu hérité quand la banque a re-libellé l'opération entre deux exports", () => {
+    // Le libellé du revenu hérité diffère de celui du remboursement créé par
+    // le réimport : la clé étiquetée ne suffit pas, le repli sans libellé
+    // (même date, même montant) doit absorber le doublon.
+    const s = migrateState({
+      soldeDepart: 0,
+      incomes: [{ id: "i1", label: "Subvention", amount: 120.87, mode: "unique", day: 21, y: 2026, m: 9, cat: "vie-quotidienne", sub: "alimentation", opLabel: "VIR RECU DE: FEDERATION" }],
+      extras: [{ id: "x1", label: "Subvention", amount: -120.87, refund: true, day: 21, y: 2026, m: 9, cat: "vie-quotidienne", sub: "alimentation", opLabel: "VIR RECU DE: FEDERATION SPORTIVE LGBT+" }],
+    });
+    expect(s.incomes).toHaveLength(0);
+    expect(s.extras).toHaveLength(1);
+    expect(s.extras[0].amount).toBe(-120.87);
+    expect(s.extras[0].refund).toBe(true);
+  });
+
+  it("v0.31.2 : absorbe via la clé sans libellé quand le revenu hérité n'en a pas", () => {
+    const s = migrateState({
+      soldeDepart: 0,
+      incomes: [{ id: "i1", label: "Remboursement", amount: 9.6, mode: "unique", day: 26, y: 2026, m: 9, cat: "vie-quotidienne", sub: "vetements" }],
+      extras: [{ id: "x1", label: "Remboursement", amount: -9.6, refund: true, day: 26, y: 2026, m: 9, cat: "vie-quotidienne", sub: "vetements", opLabel: "CARTE REMBT" }],
+    });
+    expect(s.incomes).toHaveLength(0);
+    expect(s.extras).toHaveLength(1);
+  });
+
+  it("v0.31.2 : des jumeaux légitimes re-libellés restent tous les deux", () => {
+    // Deux crédits réellement distincts, même date et même montant, libellés
+    // différemment : chaque revenu hérité absorbe un remboursement, aucun
+    // nouveau ↩ n'est créé — les deux crédits restent représentés.
+    const s = migrateState({
+      soldeDepart: 0,
+      incomes: [
+        { id: "i1", label: "Remb A", amount: 9.6, mode: "unique", day: 26, y: 2026, m: 9, cat: "vie-quotidienne", sub: "vetements", opLabel: "REMBT 24/10" },
+        { id: "i2", label: "Remb B", amount: 9.6, mode: "unique", day: 26, y: 2026, m: 9, cat: "vie-quotidienne", sub: "vetements", opLabel: "REMBT 25/10" },
+      ],
+      extras: [
+        { id: "x1", label: "Remb", amount: -9.6, refund: true, day: 26, y: 2026, m: 9, cat: "vie-quotidienne", sub: "vetements", opLabel: "REMBT A NOUVEAU LIBELLE" },
+        { id: "x2", label: "Remb", amount: -9.6, refund: true, day: 26, y: 2026, m: 9, cat: "vie-quotidienne", sub: "vetements", opLabel: "REMBT AUTRE LIBELLE" },
+      ],
+    });
+    expect(s.incomes).toHaveLength(0);
+    expect(s.extras).toHaveLength(2);
+  });
 });
 
 /* ------------------------------------------------------------------ */

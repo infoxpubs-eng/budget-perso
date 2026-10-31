@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.31.2] — 2026-10-31
+
+### Corrigé
+
+- **Absorption des remboursements dupliqués re-libellés par la banque** : la migration v0.31.1 reconnaissait les doublons (ancien revenu unique + remboursement du réimport) uniquement par la clé date + montant + libellé opération ; or la banque reformule parfois le libellé d'une même opération entre deux exports — le doublon échappait alors à l'absorption et le crédit était compté deux fois en dépense en moins. L'absorption essaie désormais la clé étiquetée puis, à défaut, la clé sans libellé (date + montant), en miroir exact du registre d'import (`addKnown`/`consumeKnown`) ; les jumeaux réellement distincts (même date, même montant, opérations différentes) restent tous représentés.
+
 ## [0.31.1] — 2026-10-31
 
 ### Corrigé

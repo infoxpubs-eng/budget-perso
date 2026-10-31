@@ -312,14 +312,23 @@ export function migrateState(raw) {
   // dépense en moins de leur couple dans les totaux et l'apprentissage des
   // habitudes). Un remboursement identique déjà présent (créé par le
   // réimport du même relevé sous v0.31.0) absorbe le revenu hérité : la
-  // double représentation disparaît, un seul crédit reste. Les revenus des
+  // double représentation disparaît, un seul crédit reste. Comme le registre
+  // d'import (addKnown/consumeKnown), l'absorption essaie la clé étiquetée
+  // puis, à défaut, la clé sans libellé : la banque reformule parfois le
+  // libellé d'une même opération entre deux exports, et l'opération
+  // re-libellée ne doit pas échapper à l'absorption. Les revenus des
   // couples de revenu ou inconnus (« À classer ») et les écritures planifiées
   // (modes fixe/salaire, sans date unique) ne sont pas touchés.
   const refundKeys = new Map();
+  const keyRefund = (y, m, day, amount, opLabel) => [y, m, day, Math.round(amount * 100), opLabel ?? ""].join("|");
   for (const x of s.extras ?? []) {
     if (x && typeof x.amount === "number" && x.amount < 0 && Number.isFinite(x.y) && Number.isFinite(x.m)) {
-      const k = [x.y, x.m, x.day, Math.round(x.amount * 100), x.opLabel ?? ""].join("|");
+      const k = keyRefund(x.y, x.m, x.day, x.amount, x.opLabel);
       refundKeys.set(k, (refundKeys.get(k) ?? 0) + 1);
+      if (x.opLabel) {
+        const ku = keyRefund(x.y, x.m, x.day, x.amount, "");
+        refundKeys.set(ku, (refundKeys.get(ku) ?? 0) + 1);
+      }
     }
   }
   const keepIncomes = [];
@@ -338,12 +347,20 @@ export function migrateState(raw) {
       continue;
     }
     incomesChanged = true;
-    const k = [i.y, i.m, i.day, Math.round(-i.amount * 100), i.opLabel ?? ""].join("|");
-    const n = refundKeys.get(k) ?? 0;
-    if (n > 0) {
+    // Absorption : clé étiquetée, puis repli sans libellé (opération
+    // re-libellée par la banque entre deux exports).
+    let absorbed = false;
+    for (const k of [keyRefund(i.y, i.m, i.day, -i.amount, i.opLabel), keyRefund(i.y, i.m, i.day, -i.amount, "")]) {
+      const n = refundKeys.get(k) ?? 0;
+      if (n > 0) {
+        refundKeys.set(k, n - 1);
+        absorbed = true;
+        break;
+      }
+    }
+    if (absorbed) {
       // Déjà représenté par le remboursement du réimport : le revenu hérité
       // disparaît, rien n'est créé (pas de double décompte du crédit).
-      refundKeys.set(k, n - 1);
       continue;
     }
     asRefunds.push({
