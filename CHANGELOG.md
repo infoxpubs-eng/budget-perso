@@ -5,6 +5,16 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.9] — 2026-10-31
+
+### Modifié
+
+- **Graphique « Solde avant salaire » restreint** : seuls les mois chargés (historique réel), le mois en cours et le mois suivant sont affichés — fin des projections à 12 mois sur cet indicateur, la tendance se lit sur le passé proche.
+
+### Ajouté
+
+- **Ligne « estimation initiale » sur l'évolution du solde du mois** : sur un mois chargé, une ligne rouge pointillée superpose la trajectoire qu'aurait donnée l'échéancier planifié seul (aucun flux réel, même solde d'ouverture) à la trajectoire réelle (ligne bleue). L'écart entre les deux montre ce que le réel a fait diverger ; le survol affiche les deux soldes côte à côte.
+
 ## [0.30.8] — 2026-10-30
 
 ### Modifié

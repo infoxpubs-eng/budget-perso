@@ -188,6 +188,9 @@ function BalanceTooltip({ active, payload }) {
     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg">
       <div className="text-xs font-semibold text-slate-500">{p.day === 0 ? "Début " + p.date.split(" ")[1] : p.date}</div>
       <div className="mt-1 text-sm font-bold text-slate-900">{fmt(p.solde)}</div>
+      {p.est !== undefined && (
+        <div className="mt-0.5 text-xs font-semibold text-rose-500">Prévu (échéancier) : {fmt(p.est)}</div>
+      )}
       {p.events.length > 0 && (
         <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
           {p.events.map((e, i) => (
@@ -398,12 +401,31 @@ export default function App() {
   };
   const salJour = salaryDayOf(sim.y, sim.m);
   const avantSalaire = beforeSalaryOf(sim);
-  // Historique complet : solde avant salaire, mois chargé (réel) ou simulé.
-  const avantSalaireData = monthsAll.map((mo) => ({
-    label: mo.label,
-    avant: beforeSalaryOf(mo),
-    reel: !!mo.hasData,
-  }));
+  // Historique : mois chargés (réels) + mois en cours + mois suivant — pas
+  // besoin de projeter plus loin, la tendance se lit sur le passé proche.
+  const nowY = now.getFullYear();
+  const nowM = now.getMonth();
+  const nextMois = new Date(nowY, nowM + 1, 1);
+  const avantSalaireData = monthsAll
+    .filter(
+      (mo) =>
+        mo.hasData ||
+        (mo.y === nowY && mo.m === nowM) ||
+        (mo.y === nextMois.getFullYear() && mo.m === nextMois.getMonth())
+    )
+    .map((mo) => ({ label: mo.label, avant: beforeSalaryOf(mo), reel: !!mo.hasData }));
+
+  // Estimation initiale du mois affiché : l'échéancier planifié SEUL (aucun
+  // flux réel) sur le même solde d'ouverture — la prévision telle qu'elle
+  // était avant l'import du relevé. Uniquement pour un mois chargé : sans
+  // relevé, elle serait confondue avec la trajectoire bleue.
+  const simEst = useMemo(
+    () => (sim.hasData ? monthSim(state, sim.y, sim.m, sim.start) : null),
+    [state, sim]
+  );
+  const dailyCompare = simEst
+    ? sim.daily.map((d, i) => ({ ...d, est: simEst.daily[i].solde }))
+    : sim.daily;
 
   const setSolde = (n) => setState((s) => ({ ...s, soldeDepart: n }));
 
@@ -809,10 +831,13 @@ export default function App() {
                   </span>
                 )}
               </div>
-              <p className="mb-3 text-xs text-slate-500">Survolez le graphique pour voir les opérations débitées / créditées chaque jour (🔒 = incompressible).</p>
+              <p className="mb-3 text-xs text-slate-500">
+                Survolez le graphique pour voir les opérations débitées / créditées chaque jour (🔒 = incompressible).
+                {simEst && <> Ligne rouge pointillée : trajectoire prévue par l'échéancier planifié (aucun flux réel) — l'écart avec la ligne bleue montre ce que le réel a fait diverger.</>}
+              </p>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={sim.daily} margin={{ top: 10, right: 16, bottom: 4, left: 8 }}>
+                  <AreaChart data={dailyCompare} margin={{ top: 10, right: 16, bottom: 4, left: 8 }}>
                     <defs>
                       <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
@@ -837,6 +862,9 @@ export default function App() {
                     <ReferenceLine y={0} stroke="#f43f5e" strokeDasharray="4 4" />
                     <ReferenceLine y={sim.start} stroke="#94a3b8" strokeDasharray="2 4" />
                     <Area type="monotone" dataKey="solde" stroke="#6366f1" strokeWidth={2.5} fill="url(#grad)" />
+                    {simEst && (
+                      <Line type="monotone" dataKey="est" stroke="#f43f5e" strokeWidth={2} strokeDasharray="5 4" dot={false} />
+                    )}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -927,11 +955,11 @@ export default function App() {
               </Card>
 
               <Card>
-                <h2 className="mb-1 font-semibold">Solde avant salaire (historique → projection)</h2>
+                <h2 className="mb-1 font-semibold">Solde avant salaire (historique + mois en cours et suivant)</h2>
                 <p className="mb-3 text-xs text-slate-500">
                   Balance du compte à la veille du jour de paie, mois après mois. Barre pleine = mois chargé
-                  (flux réels), barre estompée = simulation ; rouge = le salaire tombe sur un découvert.
-                  La tendance monte quand les économies portent leurs fruits.
+                  (flux réels), barre estompée = simulation (mois en cours et le suivant) ; rouge = le salaire
+                  tombe sur un découvert. La tendance monte quand les économies portent leurs fruits.
                 </p>
                 <div className="h-60">
                   <ResponsiveContainer width="100%" height="100%">
