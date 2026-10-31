@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.30.11] — 2026-10-31
+
+### Supprimé
+
+- **Carte « Épargne — trajectoire sur les mois chargés »** : avec des flux d'épargne clairsemés (quelques événements sur 7 mois), les barres mensuelles écrasées par un gros retrait n'apportaient rien — le signal utile (flux net du mois) reste dans la carte KPI « Flux épargne net ». La fonction `savingsFlowHistory` demeure dans la bibliothèque et ses tests.
+
 ## [0.30.10] — 2026-10-31
 
 ### Corrigé
