@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.36.0] — 2026-11-01
+
+### Ajouté
+
+- **Comparaisons temporelles 📊** : un bloc repliable dans l'Aperçu met le mois affiché (chargé) face au mois précédent et au même mois de l'année précédente — revenus, dépenses, flux d'épargne net, taux d'épargne et solde fin de mois. L'évolution face au mois précédent s'affiche en vert/rouge (montant et pourcentage) ; les mois non chargés sont signalés « non chargé » plutôt que comparés à des projections. Le même mois N−1 sert de repère saisonnier (`monthComparison()`, budget.js, testé).
+
 ## [0.35.0] — 2026-11-01
 
 ### Ajouté

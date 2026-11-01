@@ -41,6 +41,7 @@ import {
   yearSims,
   applyScenario,
   forecastBias,
+  monthComparison,
 } from "./lib/budget.js";
 import {
   TAXONOMIE,
@@ -851,6 +852,10 @@ export default function App() {
     ? scenarioSims.reduce((acc, s) => (s.min < acc.min ? s : acc), scenarioSims[0])
     : null;
 
+  // Comparaisons temporelles du mois AFFICHÉ (v0.36) : face au mois
+  // précédent et au même mois l'an dernier — mois chargés uniquement.
+  const compare = useMemo(() => monthComparison(monthsAll, sim.y, sim.m), [monthsAll, sim]);
+
   const tabs = [
     { id: "apercu", label: "Aperçu" },
     { id: "depenses", label: "Dépenses" },
@@ -1254,6 +1259,139 @@ export default function App() {
                   ↺ Réinitialiser le scénario
                 </button>
               </div>
+            </Card>
+
+            <Card
+              title={
+                <div className="flex flex-1 flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-semibold">📊 Comparaison — {sim.label}</h2>
+                  <span className="text-xs font-normal text-slate-500">face au mois précédent et au même mois l'an dernier</span>
+                </div>
+              }
+            >
+              {!compare.current ? (
+                <p className="text-xs text-slate-500">
+                  Aucun relevé chargé pour {sim.label} — importez le mois (🛠️ Admin → 📥) pour
+                  le comparer aux mois précédents.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                        <th className="py-2 pr-3 font-medium"></th>
+                        <th className="py-2 pr-3 text-right font-medium">{MONTHS[compare.current.m]} {compare.current.y}</th>
+                        <th className="py-2 pr-3 text-right font-medium">
+                          {compare.prev ? (
+                            <>vs {MONTHS[compare.prev.m]} {compare.prev.y} <span className="normal-case">(évolution)</span></>
+                          ) : (
+                            <>mois précédent</>
+                          )}
+                        </th>
+                        <th className="py-2 text-right font-medium">
+                          {compare.lastYear ? (
+                            <>{MONTHS[compare.lastYear.m]} {compare.lastYear.y}</>
+                          ) : (
+                            <>même mois N−1</>
+                          )}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {[
+                        {
+                          label: "Revenus",
+                          field: "totalIn",
+                          delta: compare.revenues,
+                          positiveIsGood: true,
+                          money: true,
+                        },
+                        {
+                          label: "Dépenses",
+                          field: "totalOut",
+                          delta: compare.depenses,
+                          positiveIsGood: false,
+                          money: true,
+                        },
+                        {
+                          label: "Épargne (flux net)",
+                          field: "fluxEpargne",
+                          delta: compare.epargne,
+                          positiveIsGood: true,
+                          money: true,
+                          signed: true,
+                        },
+                        {
+                          label: "Taux d'épargne",
+                          field: "tauxEpargne",
+                          delta: null,
+                          percent: true,
+                        },
+                        {
+                          label: "Solde fin de mois",
+                          field: "end",
+                          delta: compare.solde,
+                          positiveIsGood: true,
+                          money: true,
+                        },
+                      ].map((row) => {
+                        const cur = compare.current?.[row.field];
+                        const prev = compare.prev?.[row.field];
+                        const n1 = compare.lastYear?.[row.field];
+                        const fmtCell = (v) =>
+                          row.percent
+                            ? v == null
+                              ? "—"
+                              : Math.round(v * 100) + " %"
+                            : row.signed
+                              ? (v >= 0 ? "+ " : "− ") + fmt(Math.abs(v))
+                              : fmt(v);
+                        return (
+                          <tr key={row.label}>
+                            <td className="py-1.5 pr-3 text-slate-600">{row.label}</td>
+                            <td className="py-1.5 pr-3 text-right font-medium text-slate-900">{fmtCell(cur)}</td>
+                            <td className="py-1.5 pr-3 text-right">
+                              {compare.prev ? (
+                                <span>
+                                  {fmtCell(prev)}
+                                  {row.delta && (
+                                    <span
+                                      className={
+                                        "ml-2 text-xs font-semibold " +
+                                        ((row.delta.diff >= 0) === row.positiveIsGood && row.delta.diff !== 0
+                                          ? "text-emerald-600"
+                                          : row.delta.diff === 0
+                                            ? "text-slate-500"
+                                            : "text-rose-600")
+                                      }
+                                    >
+                                      ({row.delta.diff >= 0 ? "+" : "−"} {row.percent ? Math.abs(Math.round(row.delta.diff * 100)) + " pts" : fmt(Math.abs(row.delta.diff))}
+                                      {row.delta.pct != null && !row.percent ? ` (${row.delta.pct >= 0 ? "+" : "−"} ${Math.abs(Math.round(row.delta.pct * 100))} %)` : ""}
+                                    </span>
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-slate-400">non chargé</span>
+                              )}
+                            </td>
+                            <td className="py-1.5 text-right">
+                              {compare.lastYear ? (
+                                fmtCell(n1)
+                              ) : (
+                                <span className="text-xs text-slate-400">non chargé</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Mois réels uniquement (relevés importés). L'évolution est calculée face au mois
+                    précédent chargé ; le même mois de l'année précédente sert de repère saisonnier.
+                  </p>
+                </div>
+              )}
             </Card>
 
             <Card

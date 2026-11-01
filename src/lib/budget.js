@@ -809,7 +809,58 @@ export function forecastBias(snapshots = {}, months = [], now = new Date()) {
   return { samples, mean, count: samples.length };
 }
 
-
+/**
+ * Comparaison temporelle d'un mois chargé (v0.36) : le mois demandé face au
+ * mois précédent et au même mois de l'année précédente. Ne compare que des
+ * mois disposant de données réelles (`hasData`) ; les autres ressortent
+ * `null` (« non chargé » côté interface).
+ *
+ * @param {Array} months  mois disponibles (champs `y`, `m`, `hasData`,
+ *   `totalIn`, `totalOut`, `end`, `fluxEpargne`) — ex. `monthsAll` d'App.jsx
+ * @param {number} y  année du mois de référence
+ * @param {number} m  mois de référence (0-indexé)
+ * @returns {{
+ *   current: Object|null, prev: Object|null, lastYear: Object|null,
+ *   revenues: {diff:number,pct:number|null}|null,
+ *   depenses: {diff:number,pct:number|null}|null,
+ *   epargne: {diff:number,pct:number|null}|null,
+ *   solde: {diff:number,pct:number|null}|null,
+ * }}  `pct` = évolution en fraction (0,1 = +10 %), null si base nulle.
+ */
+export function monthComparison(months = [], y, m) {
+  const pick = (yy, mm) => {
+    const mo = (months ?? []).find((x) => x.y === yy && x.m === mm);
+    if (!mo || !mo.hasData) return null;
+    return {
+      y: yy,
+      m: mm,
+      totalIn: mo.totalIn,
+      totalOut: mo.totalOut,
+      end: mo.end,
+      fluxEpargne: mo.fluxEpargne ?? 0,
+      tauxEpargne: mo.totalIn > 0 ? (mo.totalIn - mo.totalOut) / mo.totalIn : null,
+    };
+  };
+  const cur = pick(y, m);
+  const prev = pick(m === 0 ? y - 1 : y, m === 0 ? 11 : m - 1);
+  const lastYear = pick(y - 1, m);
+  // Écarts vs mois précédent uniquement (le N−1 sert de repère visuel).
+  const delta = (field) => {
+    if (!cur || !prev) return null;
+    const diff = cur[field] - prev[field];
+    const base = prev[field];
+    return { diff, pct: base > 0 ? diff / base : null };
+  };
+  return {
+    current: cur,
+    prev,
+    lastYear,
+    revenues: delta("totalIn"),
+    depenses: delta("totalOut"),
+    epargne: delta("fluxEpargne"),
+    solde: delta("end"),
+  };
+}
 
 /**
  * Âge en jours de la dernière sauvegarde exportée (fichier JSON téléchargé

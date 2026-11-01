@@ -32,6 +32,7 @@ import {
   yearSims,
   applyScenario,
   forecastBias,
+  monthComparison,
 } from "./budget.js";
 import {
   TAXONOMIE,
@@ -1794,3 +1795,71 @@ describe("forecastBias (calibrage du modèle, v0.35)", () => {
   });
 });
 
+describe("monthComparison (comparaisons temporelles, v0.36)", () => {
+  const mo = (y, m, over = {}) => ({
+    y, m, hasData: true, totalIn: 2000, totalOut: 1500, end: 500, fluxEpargne: 100, ...over,
+  });
+  const months = [
+    mo(2026, 8),                                      // septembre (référence précédente)
+    mo(2026, 9, { totalIn: 2200, totalOut: 1400, end: 800, fluxEpargne: 200 }), // octobre
+    mo(2026, 10, { totalIn: 2400, totalOut: 1500, end: 900, fluxEpargne: 150 }), // novembre
+    mo(2025, 10, { totalIn: 2100, totalOut: 1800, end: 300, fluxEpargne: 50 }),  // novembre N−1
+  ];
+
+  it("compare le mois courant au précédent et au même mois N−1", () => {
+    const c = monthComparison(months, 2026, 10);
+    expect(c.current.totalIn).toBe(2400);
+    expect(c.prev.totalIn).toBe(2200);   // octobre
+    expect(c.lastYear.totalIn).toBe(2100); // novembre 2025
+    // Écarts vs octobre : revenus +200 (+9,09 %), dépenses +100 (+7,14 %).
+    expect(c.revenues.diff).toBe(200);
+    expect(c.revenues.pct).toBeCloseTo(200 / 2200, 5);
+    expect(c.depenses.diff).toBe(100);
+    expect(c.depenses.pct).toBeCloseTo(100 / 1400, 5);
+    expect(c.epargne.diff).toBe(-50);
+    expect(c.solde.diff).toBe(100);
+  });
+
+  it("taux d'épargne = (entrées − sorties) / entrées si entrées > 0, sinon null", () => {
+    const c = monthComparison(months, 2026, 10);
+    expect(c.current.tauxEpargne).toBeCloseTo(900 / 2400, 5);
+    const c0 = monthComparison([mo(2026, 9, { totalIn: 0 })], 2026, 9);
+    expect(c0.current.tauxEpargne).toBeNull();
+  });
+
+  it("janvier : le mois précédent est décembre de l'année d'avant", () => {
+    const months2 = [
+      mo(2025, 11, { totalIn: 3000 }),
+      mo(2026, 0, { totalIn: 2500 }),
+    ];
+    const c = monthComparison(months2, 2026, 0);
+    expect(c.prev.y).toBe(2025);
+    expect(c.prev.m).toBe(11);
+    expect(c.revenues.diff).toBe(-500);
+    expect(c.revenues.pct).toBeCloseTo(-500 / 3000, 5);
+  });
+
+  it("mois non chargé (hasData faux ou absent) : null, sans crash", () => {
+    const c = monthComparison([{ y: 2026, m: 10, hasData: false, totalIn: 1 }], 2026, 10);
+    expect(c.current).toBeNull();
+    expect(c.prev).toBeNull();
+    expect(c.lastYear).toBeNull();
+    expect(c.revenues).toBeNull();
+    expect(monthComparison([], 2026, 10).current).toBeNull();
+    expect(monthComparison(null, 2026, 10).current).toBeNull();
+  });
+
+  it("précédent ou N−1 non chargé : comparaisons null mais courant présent", () => {
+    const c = monthComparison([mo(2026, 10)], 2026, 10);
+    expect(c.current.totalIn).toBe(2000);
+    expect(c.prev).toBeNull();
+    expect(c.lastYear).toBeNull();
+    expect(c.revenues).toBeNull();
+  });
+
+  it("évolution nulle quand la base est à 0 (aucune entrée avant)", () => {
+    const c = monthComparison([mo(2026, 9, { totalIn: 0 }), mo(2026, 10)], 2026, 10);
+    expect(c.revenues.diff).toBe(2000);
+    expect(c.revenues.pct).toBeNull();
+  });
+});
