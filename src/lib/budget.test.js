@@ -26,6 +26,7 @@ import {
   isRecurringIncome,
   recurringSchedule,
   recurringMonthTotals,
+  refundsTotal,
 } from "./budget.js";
 import {
   TAXONOMIE,
@@ -1602,5 +1603,43 @@ describe("MONTHS_SHORT — abréviations d'axe en 3 caractères", () => {
       const short = MONTHS_SHORT[MONTHS.indexOf(label.split(" ")[0])] ?? label.split(" ")[0];
       expect(short).toHaveLength(3);
     }
+  });
+});
+
+describe("refundsTotal (crédits du mois, hors revenus)", () => {
+  it("additionne les crédits « refund » d'un mois réel — montants POSITIFS dans les tx", () => {
+    const st = migrateState({
+      soldeDepart: 0,
+      expenses: [],
+      incomes: [],
+      extras: [
+        { id: "r1", label: "Remb A", amount: -120.87, y: 2026, m: 8, day: 21, refund: true },
+        { id: "r2", label: "Remb B", amount: -204.2, y: 2026, m: 8, day: 15, refund: true },
+        { id: "d1", label: "Dép", amount: 30, y: 2026, m: 8, day: 20 },
+      ],
+    });
+    const sim = realMonthSim(st, 2026, 8, 0);
+    expect(refundsTotal(sim.tx)).toBeCloseTo(325.07);
+    expect(sim.totalIn).toBeCloseTo(0);         // jamais comptés comme revenus
+    expect(sim.totalOut).toBeCloseTo(-295.07); // dépenses NETTES : 30 − 325,07 (crédits en moins)
+  });
+
+  it("est nul sans remboursement (mois simulé futur)", () => {
+    const st = migrateState({ soldeDepart: 0 });
+    expect(refundsTotal(monthSim(st, 2026, 10, 0).tx)).toBeCloseTo(0);
+  });
+
+  it("un mois ne compte que ses propres crédits", () => {
+    const st = migrateState({
+      soldeDepart: 0,
+      expenses: [],
+      incomes: [],
+      extras: [
+        { id: "r1", label: "Remb sept.", amount: -100, y: 2026, m: 8, day: 10, refund: true },
+        { id: "r2", label: "Remb oct.", amount: -50, y: 2026, m: 9, day: 12, refund: true },
+      ],
+    });
+    expect(refundsTotal(realMonthSim(st, 2026, 8, 0).tx)).toBeCloseTo(100);
+    expect(refundsTotal(realMonthSim(st, 2026, 9, 100).tx)).toBeCloseTo(50);
   });
 });

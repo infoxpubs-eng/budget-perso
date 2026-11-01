@@ -630,6 +630,17 @@ export function monthSim(state, y, m, opening) {
 }
 
 /**
+ * Total des remboursements ↩ (et autres crédits « refund ») d'un mois simulé :
+ * argent réellement perçu sur le compte mais compté en dépenses en moins,
+ * jamais dans `totalIn`. Attention au signe : dans les transactions du mois,
+ * un événement « refund » porte un montant POSITIF (crédit reçu) — c'est
+ * l'extra sous-jacent qui est négatif.
+ */
+export function refundsTotal(tx) {
+  return (tx ?? []).filter((t) => t.type === "refund").reduce((a, t) => a + t.amount, 0);
+}
+
+/**
  * Simulation d'un mois CHARGÉ sur des données réelles : les flux du mois
  * sont les transactions réellement importées (occurrences d'historique,
  * exceptionnels, revenus uniques). Avec `today` (mois courant), les

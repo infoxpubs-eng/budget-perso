@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.32.2] — 2026-11-01
+
+### Corrigé
+
+- **Hint « autres montants perçus » jamais affiché** : la v0.32.1 calculait la somme des crédits « refund » avec un signe inversé — dans les transactions du mois, un événement « refund » porte un montant POSITIF (crédit reçu), c'est l'extra sous-jacent qui est négatif ; le total ressortait donc négatif et le hint ne s'affichait pour aucun mois (octobre et septembre chargés compris). Correctif : helper `refundsTotal(tx)` dans budget.js (testé, 3 nouveaux tests), utilisé par la carte « Revenus du mois ».
+
 ## [0.32.1] — 2026-11-01
 
 ### Ajouté

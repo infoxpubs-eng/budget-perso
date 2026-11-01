@@ -35,6 +35,7 @@ import {
   isRecurringIncome,
   recurringSchedule,
   recurringMonthTotals,
+  refundsTotal,
 } from "./lib/budget.js";
 import {
   TAXONOMIE,
@@ -796,11 +797,9 @@ export default function App() {
   // crédits typés « refund » (remboursements ↩ sur couples de dépense, mais
   // aussi dépôts et autres crédits — tous déduits des dépenses du mois, pas
   // des revenus) et les retraits d'épargne ⇄ crédités sur le compte (suivis
-  // par le KPI « Flux épargne net »).
-  const creditsOfMonth = useMemo(
-    () => -sim.tx.filter((t) => t.type === "refund").reduce((a, t) => a + t.amount, 0),
-    [sim]
-  );
+  // par le KPI « Flux épargne net »). Signe : dans les transactions du mois,
+  // un événement « refund » porte un montant POSITIF (crédit reçu).
+  const creditsOfMonth = useMemo(() => refundsTotal(sim.tx), [sim]);
 
   const tabs = [
     { id: "apercu", label: "Aperçu" },
