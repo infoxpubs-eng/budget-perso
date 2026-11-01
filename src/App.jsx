@@ -792,6 +792,16 @@ export default function App() {
     [state, sims]
   );
 
+  // Autres montants perçus sur le compte, hors « Revenus du mois » : les
+  // crédits typés « refund » (remboursements ↩ sur couples de dépense, mais
+  // aussi dépôts et autres crédits — tous déduits des dépenses du mois, pas
+  // des revenus) et les retraits d'épargne ⇄ crédités sur le compte (suivis
+  // par le KPI « Flux épargne net »).
+  const creditsOfMonth = useMemo(
+    () => -sim.tx.filter((t) => t.type === "refund").reduce((a, t) => a + t.amount, 0),
+    [sim]
+  );
+
   const tabs = [
     { id: "apercu", label: "Aperçu" },
     { id: "depenses", label: "Dépenses" },
@@ -931,7 +941,20 @@ export default function App() {
               </div>
               <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
               <Kpi label="Solde en début de mois" value={fmt(sim.start)} />
-              <Kpi label="Revenus du mois" value={"+ " + fmt(sim.totalIn)} tone="good" />
+              <Kpi
+                label="Revenus du mois"
+                value={"+ " + fmt(sim.totalIn)}
+                tone="good"
+                hint={
+                  creditsOfMonth > 0 && (sim.transferIn ?? 0) > 0
+                    ? "En plus, hors revenus : + " + fmt(creditsOfMonth) + " de crédits (remboursements ↩, dépôts…) · + " + fmt(sim.transferIn) + " d'épargne ⇄"
+                    : creditsOfMonth > 0
+                      ? "En plus, hors revenus : + " + fmt(creditsOfMonth) + " (remboursements ↩, dépôts…) — déduits des dépenses, pas des revenus"
+                      : (sim.transferIn ?? 0) > 0
+                        ? "En plus, hors revenus : + " + fmt(sim.transferIn) + " reçus de l'épargne ⇄ (suivis par « Flux épargne net »)"
+                        : undefined
+                }
+              />
               <Kpi label="Dépenses du mois" value={"− " + fmt(sim.totalOut)} tone="bad" />
               <Kpi
                 label="Solde actuel"

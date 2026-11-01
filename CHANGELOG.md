@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.32.1] — 2026-11-01
+
+### Ajouté
+
+- **Carte « Revenus du mois » : autres montants perçus** : en petit et en gris sous le montant, la somme des crédits reçus non comptés comme revenus — remboursements ↩ et autres crédits (dépôts…), tous déduits des dépenses du mois, plus les retraits d'épargne ⇄ crédités sur le compte (suivis par « Flux épargne net »). Exemple : « En plus, hors revenus : + 325,07 € (remboursements ↩, dépôts…) — déduits des dépenses, pas des revenus ». Rien ne s'affiche quand il n'y en a pas ; les mois futurs (sans relevé) ne montrent donc rien.
+
 ## [0.32.0] — 2026-10-31
 
 ### Ajouté
