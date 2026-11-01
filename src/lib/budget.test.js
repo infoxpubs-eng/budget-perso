@@ -27,6 +27,8 @@ import {
   recurringSchedule,
   recurringMonthTotals,
   refundsTotal,
+  BACKUP_STALE_DAYS,
+  backupAgeDays,
 } from "./budget.js";
 import {
   TAXONOMIE,
@@ -1641,5 +1643,24 @@ describe("refundsTotal (crédits du mois, hors revenus)", () => {
     });
     expect(refundsTotal(realMonthSim(st, 2026, 8, 0).tx)).toBeCloseTo(100);
     expect(refundsTotal(realMonthSim(st, 2026, 9, 100).tx)).toBeCloseTo(50);
+  });
+});
+
+describe("backupAgeDays (rappel d'export)", () => {
+  it("retourne null si jamais exportée ou date invalide", () => {
+    expect(backupAgeDays(null)).toBeNull();
+    expect(backupAgeDays(undefined)).toBeNull();
+    expect(backupAgeDays("pas-une-date")).toBeNull();
+  });
+
+  it("compte les jours écoulés depuis la dernière sauvegarde", () => {
+    const now = new Date(2026, 10, 1);
+    expect(backupAgeDays(new Date(2026, 9, 2).toISOString(), now)).toBe(30);
+    expect(backupAgeDays(new Date(2026, 9, 3).toISOString(), now)).toBe(29);
+    expect(backupAgeDays(now.toISOString(), now)).toBe(0);
+  });
+
+  it("le seuil de rappel est de 30 jours", () => {
+    expect(BACKUP_STALE_DAYS).toBe(30);
   });
 });

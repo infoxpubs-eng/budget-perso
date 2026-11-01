@@ -714,6 +714,20 @@ export function hasRealData(state, y, m) {
   return false;
 }
 
+/** Seuil d'ancienneté (jours) au-delà duquel le rappel d'export s'affiche. */
+export const BACKUP_STALE_DAYS = 30;
+
+/**
+ * Âge en jours de la dernière sauvegarde exportée (fichier JSON téléchargé
+ * via 💾). `null` si jamais exportée ou date invalide.
+ */
+export function backupAgeDays(lastAt, now = new Date()) {
+  if (!lastAt) return null;
+  const t = new Date(lastAt).getTime();
+  if (isNaN(t)) return null;
+  return Math.floor((now.getTime() - t) / 86400000);
+}
+
 /**
  * Transactions RÉELLES du mois (y, m), reconstruites des données chargées :
  * occurrences d'historique des écritures planifiées (dates et montants

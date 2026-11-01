@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.33.0] — 2026-11-01
+
+### Ajouté
+
+- **Fiabilité des données (PWA, stockage persistant, rappel d'export)** : l'application vit entièrement dans le localStorage du navigateur — un nettoyage du navigateur effacerait des mois de relevés. Trois protections : l'app devient une **PWA installable** (manifest + icônes 192/512 px + service worker minimal — cache d'abord pour les bundles hachés `/assets/`, réseau d'abord pour tout le reste : jamais de version périmée, disponible hors ligne) ; au démarrage, `navigator.storage.persist()` demande au navigateur de **marquer le stockage persistant** (non évincé faute de place, meilleur effort) ; un **bandeau ambré** rappelle d'exporter une copie si la dernière sauvegarde téléchargée date de plus de 30 jours (`backupAgeDays`, testé) ou n'existe pas encore. Le bandeau se masque pour la session ; l'export reste dans 🛠️ Admin → 💾.
+
 ## [0.32.2] — 2026-11-01
 
 ### Corrigé

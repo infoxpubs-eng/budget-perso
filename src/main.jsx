@@ -8,3 +8,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <App />
   </React.StrictMode>
 );
+
+// PWA : enregistrement du service worker (installation mobile/desktop).
+// Échoue silencieusement hors contexte sécurisé ou non supporté.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}

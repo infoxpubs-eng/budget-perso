@@ -49,6 +49,7 @@ npm test          # lance la suite de tests (Vitest)
 
 ```
 ├── index.html
+├── public/                 # PWA : manifest.webmanifest, icônes (192/512), sw.js (cache minimal)
 ├── package.json
 ├── vite.config.js          # Vite + Tailwind CSS v4 + configuration Vitest
 ├── src/

@@ -36,6 +36,8 @@ import {
   recurringSchedule,
   recurringMonthTotals,
   refundsTotal,
+  BACKUP_STALE_DAYS,
+  backupAgeDays,
 } from "./lib/budget.js";
 import {
   TAXONOMIE,
@@ -288,6 +290,8 @@ export default function App() {
   const csvRef = useRef(null);
   // Rapport d'import CSV en attente de confirmation (dialogue dédié)
   const [csvImport, setCsvImport] = useState(null);
+  // Rappel d'export masqué manuellement (pour la session en cours)
+  const [backupDismissed, setBackupDismissed] = useState(false);
 
   // ----- Persistance : chargement au démarrage -----
   useEffect(() => {
@@ -297,6 +301,12 @@ export default function App() {
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === "object") setState(migrateState(parsed));
       }
+    } catch (e) {}
+    // Demander au navigateur de marquer le stockage « persistant » :
+    // il ne sera pas évincé automatiquement faute de place (meilleur effort,
+    // silencieux si refusé ou non supporté).
+    try {
+      navigator.storage?.persist?.();
     } catch (e) {}
     setLoaded(true);
   }, []);
@@ -801,6 +811,16 @@ export default function App() {
   // un événement « refund » porte un montant POSITIF (crédit reçu).
   const creditsOfMonth = useMemo(() => refundsTotal(sim.tx), [sim]);
 
+  // Rappel d'export : les données ne vivent que dans ce navigateur. Si la
+  // dernière copie exportée date de plus de BACKUP_STALE_DAYS (ou n'existe
+  // jamais) alors qu'il y a des données, un bandeau discret le rappelle.
+  const backupAge = backupAgeDays(state.backup?.lastAt);
+  const backupStale =
+    loaded &&
+    !backupDismissed &&
+    ((state.extras ?? []).length > 0 || state.expenses.length > 0) &&
+    (backupAge === null || backupAge >= BACKUP_STALE_DAYS);
+
   const tabs = [
     { id: "apercu", label: "Aperçu" },
     { id: "depenses", label: "Dépenses" },
@@ -826,6 +846,23 @@ export default function App() {
               className="shrink-0 rounded-md px-2 py-1 text-rose-500 hover:bg-rose-100"
               onClick={() => setSaveError(null)}
               title="Masquer (réapparaîtra au prochain échec)"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        {backupStale && (
+          <div className="mb-4 flex items-start justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <div>
+              <span className="font-semibold">
+                💾 {backupAge === null ? "Aucune sauvegarde exportée à ce jour." : "Dernière sauvegarde exportée il y a " + backupAge + " jours."}
+              </span>{" "}
+              Vos données ne vivent que dans ce navigateur — exportez une copie depuis 🛠️ Admin → 💾 pour pouvoir les restaurer ailleurs (autre navigateur, téléphone) ou après un nettoyage du navigateur.
+            </div>
+            <button
+              className="shrink-0 rounded-md px-2 py-1 text-amber-600 hover:bg-amber-100"
+              onClick={() => setBackupDismissed(true)}
+              title="Masquer pour cette session"
             >
               ✕
             </button>
