@@ -31,6 +31,7 @@ import {
   backupAgeDays,
   yearSims,
   applyScenario,
+  forecastBias,
 } from "./budget.js";
 import {
   TAXONOMIE,
@@ -277,14 +278,16 @@ describe("migrateState", () => {
 
   it("fournit les réglages du modèle prédictif par défaut (v0.22)", () => {
     const s = migrateState(null);
-    expect(s.estimation).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane" });
+    expect(s.estimation).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane", correction: 0 });
   });
 
   it("fusionne les réglages utilisateur du modèle et borne les valeurs", () => {
     const s = migrateState({ estimation: { window: 3, presenceMin: 0.8, stat: "moyenne" } });
-    expect(s.estimation).toEqual({ window: 3, presenceMin: 0.8, stat: "moyenne" });
+    expect(s.estimation).toEqual({ window: 3, presenceMin: 0.8, stat: "moyenne", correction: 0 });
     const s2 = migrateState({ estimation: { window: 99, presenceMin: 2, stat: "inconnu" } });
-    expect(s2.estimation).toEqual({ window: 24, presenceMin: 1, stat: "mediane" });
+    expect(s2.estimation).toEqual({ window: 24, presenceMin: 1, stat: "mediane", correction: 0 });
+    const s3 = migrateState({ estimation: { window: 3, correction: 250 } });
+    expect(s3.estimation.correction).toBe(250); // la correction persiste (v0.35)
   });
 
   it("fournit les réglages de sauvegarde par défaut (auto, jamais exécutée)", () => {
@@ -1731,3 +1734,63 @@ describe("applyScenario (simulation « et si… »)", () => {
     expect(sims[1].end - baseSims[1].end).toBeCloseTo(200); // +10 % de 2000
   });
 });
+
+describe("forecastBias (calibrage du modèle, v0.35)", () => {
+  // « Aujourd'hui » = 1er novembre 2026 : septembre et octobre sont passés.
+  const now = new Date(2026, 10, 1);
+  const months = [
+    { y: 2026, m: 8, hasData: true, end: 950 },   // septembre : réel chargé
+    { y: 2026, m: 9, hasData: true, end: 1120 },  // octobre : réel chargé
+    { y: 2026, m: 10, hasData: true, end: 800 },  // novembre : en cours
+  ];
+  const snaps = {
+    "2026-8": { savedAt: new Date(2026, 8, 1).toISOString(), probable: 900 },
+    "2026-9": { savedAt: new Date(2026, 9, 1).toISOString(), probable: 1000 },
+    "2026-10": { savedAt: new Date(2026, 10, 1).toISOString(), probable: 850 },
+  };
+
+  it("un seul mois passé comparable : un échantillon, écart = réel − prévu", () => {
+    const b = forecastBias({ "2026-9": snaps["2026-9"] }, months, now);
+    expect(b.count).toBe(1);
+    expect(b.samples[0]).toEqual({ y: 2026, m: 9, reel: 1120, prevu: 1000, ecart: 120 });
+    expect(b.mean).toBe(120);
+  });
+
+  it("plusieurs mois passés : moyenne des écarts, tri chronologique", () => {
+    const b = forecastBias(snaps, months, now);
+    expect(b.count).toBe(2); // septembre (+50) et octobre (+120) → moyenne 85
+    expect(b.samples.map((s) => s.m)).toEqual([8, 9]);
+    expect(b.mean).toBeCloseTo(85, 5);
+  });
+
+  it("exclut le mois courant et les mois futurs", () => {
+    const b = forecastBias({ "2026-10": snaps["2026-10"], "2026-11": snaps["2026-10"] }, months, now);
+    expect(b.count).toBe(0);
+    expect(b.mean).toBe(0);
+  });
+
+  it("exclut les mois passés sans réel chargé (hasData faux ou absent)", () => {
+    const b = forecastBias(snaps, [
+      { y: 2026, m: 8, hasData: false, end: 950 },
+      { y: 2026, m: 9, hasData: true, end: 1120 },
+    ], now);
+    expect(b.count).toBe(1);
+    expect(b.samples[0].m).toBe(9);
+  });
+
+  it("exclut les instantanés sans `probable` numérique", () => {
+    const b = forecastBias({ "2026-9": { savedAt: "x" } }, months, now);
+    expect(b.count).toBe(0);
+  });
+
+  it("entrées vides ou clés invalides : count 0, sans crash", () => {
+    expect(forecastBias(null, null, now)).toEqual({ samples: [], mean: 0, count: 0 });
+    expect(forecastBias({ "nimporte": {} }, months, now).count).toBe(0);
+  });
+
+  it("écart négatif : le modèle annonce plus haut que le réel", () => {
+    const b = forecastBias({ "2026-9": { probable: 1200 } }, months, now);
+    expect(b.mean).toBe(-80); // 1120 − 1200
+  });
+});
+

@@ -781,6 +781,37 @@ export function hasRealData(state, y, m) {
 export const BACKUP_STALE_DAYS = 30;
 
 /**
+ * Biais du modèle prédictif, mesuré sur l'historisation des prévisions :
+ * pour chaque mois TERMINÉ (strictement avant le mois courant) disposant
+ * d'un instantané (`forecastSnapshots`, clé "y-m") ET de données réelles
+ * chargées (`months` : objets avec `hasData` et `end`), l'écart entre le
+ * solde réel et le solde probable prévu à l'époque (réel − prévu).
+ *
+ * @returns {{samples: Array<{y,m,reel,prevu,ecart}>, mean: number, count: number}}
+ *   `mean > 0` : le modèle annonce plus bas que le réel (habitudes moins
+ *   chères que prévu) ; `mean < 0` : le modèle annonce trop haut.
+ */
+export function forecastBias(snapshots = {}, months = [], now = new Date()) {
+  const nowY = now.getFullYear();
+  const nowM = now.getMonth();
+  const samples = [];
+  for (const [key, snap] of Object.entries(snapshots ?? {})) {
+    const [y, m] = key.split("-").map(Number);
+    if (!Number.isFinite(y) || !Number.isFinite(m)) continue;
+    if (y > nowY || (y === nowY && m >= nowM)) continue; // futur ou en cours
+    if (typeof snap?.probable !== "number") continue;
+    const mo = months.find((x) => x.y === y && x.m === m);
+    if (!mo || !mo.hasData) continue; // pas de réel pour comparer
+    samples.push({ y, m, reel: mo.end, prevu: snap.probable, ecart: mo.end - snap.probable });
+  }
+  samples.sort((a, b) => a.y - b.y || a.m - b.m);
+  const mean = samples.length ? samples.reduce((a, s) => a + s.ecart, 0) / samples.length : 0;
+  return { samples, mean, count: samples.length };
+}
+
+
+
+/**
  * Âge en jours de la dernière sauvegarde exportée (fichier JSON téléchargé
  * via 💾). `null` si jamais exportée ou date invalide.
  */

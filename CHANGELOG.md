@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.35.0] — 2026-11-01
+
+### Ajouté
+
+- **Calibrage automatique du modèle prédictif** : l'historique des prévisions (instantanés jamais écrasés, v0.32) permet désormais de **mesurer le biais du modèle** — écart moyen entre le réel et le prévu sur les mois terminés (`forecastBias()`, budget.js, testé). Dans le bloc « Historique des prévisions » de l'Aperçu, une ligne indique ce biais moyen ; à partir de 3 mois terminés comparables, un bouton le **reporte d'un clic sur la provision** (« Réduire/Augmenter la provision de X €/mois »). Un réglage manuel « Correction mensuelle (€) » (−1000 à +1000) est ajouté à la carte Admin « Modèle prédictif », inclus dans le total de la provision (plancher 0, testé) et donc dans le KPI « Solde fin de mois probable ».
+
 ## [0.34.0] — 2026-11-01
 
 ### Ajouté

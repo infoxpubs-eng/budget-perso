@@ -40,6 +40,7 @@ import {
   backupAgeDays,
   yearSims,
   applyScenario,
+  forecastBias,
 } from "./lib/budget.js";
 import {
   TAXONOMIE,
@@ -510,6 +511,15 @@ export default function App() {
       return { key, y, m, snap, mo, isCurrent, past, real };
     })
     .sort((a, b) => b.y - a.y || b.m - a.m);
+  // Réglages du modèle partagés entre l'Aperçu et la carte Admin
+  // (le composant Admin a son propre setter local, inaccessible d'ici).
+  const setEstimation = (key, value) =>
+    setState((s) => ({ ...s, estimation: { ...(s.estimation ?? DEFAULT_ESTIMATION), [key]: value } }));
+  // Biais du modèle sur les mois terminés ayant un instantané ET un réel.
+  const biasInfo = useMemo(
+    () => forecastBias(state.forecastSnapshots, monthsAll),
+    [state.forecastSnapshots, monthsAll]
+  );
   const avantSalaireData = monthsAll
     .filter(
       (mo) =>
@@ -1135,6 +1145,32 @@ export default function App() {
                     );
                   })}
                 </div>
+                {biasInfo.count > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                    <span>
+                      Biais moyen du modèle (réel − prévu) sur {biasInfo.count} mois terminé
+                      {biasInfo.count > 1 ? "s" : ""} :{" "}
+                      <span className={"font-semibold " + (biasInfo.mean >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                        {biasInfo.mean >= 0 ? "+" : "−"} {fmt(Math.abs(biasInfo.mean))}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {" "}
+                        {biasInfo.mean >= 0 ? "— le modèle annonce plus bas que le réel" : "— le modèle annonce plus haut que le réel"}
+                      </span>
+                    </span>
+                    {biasInfo.count >= 3 ? (
+                      <button
+                        type="button"
+                        onClick={() => setEstimation("correction", Math.round(-biasInfo.mean))}
+                        className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700"
+                      >
+                        {biasInfo.mean >= 0 ? "Réduire" : "Augmenter"} la provision de {fmt(Math.abs(Math.round(biasInfo.mean)))} €/mois
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-500">Après 3 mois terminés, ce biais pourra être reporté d'un clic.</span>
+                    )}
+                  </div>
+                )}
               </Card>
             )}
 
@@ -2747,10 +2783,12 @@ function AdminPanel({ state, setState, prov, simLabel, exportData }) {
             Aperçu) : fenêtre d'apprentissage (mois complets, zéros inclus), présence minimale
             (fraction des mois de la fenêtre — en dessous de la moitié, une médiane à zéros
             inclus est déjà nulle : le seuil ne mord alors pas), statistique de tendance
-            (la médiane ignore les extrêmes, la moyenne suit les gros mois). Sans relevé
-            importé, la provision est nulle ; les réglages sont persistés avec l'état.
+            (la médiane ignore les extrêmes, la moyenne suit les gros mois) et correction
+            mensuelle fixe (biais mesuré par l'historique des prévisions : réel − prévu,
+            reportable d'un clic depuis l'Aperçu). Sans relevé importé, la provision est
+            nulle ; les réglages sont persistés avec l'état.
           </p>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-4">
             <Field label="Fenêtre (mois)">
               <div title="Fenêtre d'apprentissage (1 à 24 mois complets)">
                 <NumInput value={est.window} onChange={(v) => setEst("window", Math.max(1, Math.min(24, Math.round(v))))} />
@@ -2771,6 +2809,14 @@ function AdminPanel({ state, setState, prov, simLabel, exportData }) {
                 <option value="mediane">Médiane (ignore les extrêmes)</option>
                 <option value="moyenne">Moyenne (suit les gros mois)</option>
               </select>
+            </Field>
+            <Field label="Correction mensuelle (€)">
+              <div title="Ajustement fixe de la provision (−1000 à +1000 €) : négatif = provision réduite, positif = provision majorée">
+                <NumInput
+                  value={est.correction ?? 0}
+                  onChange={(v) => setEst("correction", Math.max(-1000, Math.min(1000, Math.round(v))))}
+                />
+              </div>
             </Field>
           </div>
           <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">

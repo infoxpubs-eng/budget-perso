@@ -262,18 +262,54 @@ const sixVar = [
 
 describe("normEstimation", () => {
   it("réglages par défaut", () => {
-    expect(normEstimation()).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane" });
-    expect(DEFAULT_ESTIMATION).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane" });
+    expect(normEstimation()).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane", correction: 0 });
+    expect(DEFAULT_ESTIMATION).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane", correction: 0 });
   });
 
   it("bornes sûres : fenêtre 1–24, présence 0–1, statistique énumérée", () => {
-    expect(normEstimation({ window: 99 })).toEqual({ window: 24, presenceMin: 0.5, stat: "mediane" });
-    expect(normEstimation({ window: 2.7 })).toEqual({ window: 3, presenceMin: 0.5, stat: "mediane" });
-    expect(normEstimation({ window: 0 })).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane" });
-    expect(normEstimation({ presenceMin: 1.5 })).toEqual({ window: 6, presenceMin: 1, stat: "mediane" });
-    expect(normEstimation({ presenceMin: -1 })).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane" });
-    expect(normEstimation({ stat: "n'importe" })).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane" });
-    expect(normEstimation({ stat: "moyenne" })).toEqual({ window: 6, presenceMin: 0.5, stat: "moyenne" });
+    expect(normEstimation({ window: 99 })).toEqual({ window: 24, presenceMin: 0.5, stat: "mediane", correction: 0 });
+    expect(normEstimation({ window: 2.7 })).toEqual({ window: 3, presenceMin: 0.5, stat: "mediane", correction: 0 });
+    expect(normEstimation({ window: 0 })).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane", correction: 0 });
+    expect(normEstimation({ presenceMin: 1.5 })).toEqual({ window: 6, presenceMin: 1, stat: "mediane", correction: 0 });
+    expect(normEstimation({ presenceMin: -1 })).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane", correction: 0 });
+    expect(normEstimation({ stat: "n'importe" })).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane", correction: 0 });
+    expect(normEstimation({ stat: "moyenne" })).toEqual({ window: 6, presenceMin: 0.5, stat: "moyenne", correction: 0 });
+  });
+
+  it("correction : défaut 0, bornée à [−1000, 1000], arrondie", () => {
+    expect(normEstimation({ correction: 150 })).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane", correction: 150 });
+    expect(normEstimation({ correction: -150 })).toEqual({ window: 6, presenceMin: 0.5, stat: "mediane", correction: -150 });
+    expect(normEstimation({ correction: 5000 }).correction).toBe(1000);
+    expect(normEstimation({ correction: -5000 }).correction).toBe(-1000);
+    expect(normEstimation({ correction: 12.6 }).correction).toBe(12.6);
+    expect(normEstimation({ correction: "pas un nombre" }).correction).toBe(0);
+  });
+});
+
+describe("remainingProvision — correction de biais (v0.35)", () => {
+  it("correction négative : provision réduite du biais mesuré", () => {
+    // Tendance 350 ; biais réel−prévu de +50 € → provision 350 − 50.
+    const p = remainingProvision({ extras: sixMonths, expenses: [], y: 2026, m: 9, settings: { correction: -50 } });
+    expect(p.lines[0].left).toBe(350); // les lignes détaillées restent brutes
+    expect(p.total).toBe(300); // seul le total est corrigé
+  });
+
+  it("correction positive : provision majorée", () => {
+    const p = remainingProvision({ extras: sixMonths, expenses: [], y: 2026, m: 9, settings: { correction: 75 } });
+    expect(p.total).toBe(425);
+  });
+
+  it("correction ne rend jamais la provision négative", () => {
+    const p = remainingProvision({ extras: sixMonths, expenses: [], y: 2026, m: 9, settings: { correction: -1000 } });
+    expect(p.total).toBe(0);
+  });
+
+  it("correction s'applique aussi au prorata du mois courant", () => {
+    // Octobre 2026, aujourd'hui le 15 : provision 350 × 16/31, puis −40.
+    const p = remainingProvision({
+      extras: sixMonths, expenses: [], y: 2026, m: 9, today: 15, settings: { correction: -40 },
+    });
+    expect(p.total).toBeCloseTo(Math.max(0, (350 * 16) / 31 - 40), 2);
   });
 });
 

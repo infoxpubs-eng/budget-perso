@@ -49,6 +49,7 @@ export const DEFAULT_ESTIMATION = {
   window: TENDENCY_WINDOW,
   presenceMin: PRESENCE_MIN,
   stat: "mediane",
+  correction: 0,
 };
 
 /** Normalise les réglages (bornes sûres, replis sur les défauts). */
@@ -56,10 +57,14 @@ export function normEstimation(settings = {}) {
   const s = settings ?? {};
   const w = Number(s.window);
   const p = Number(s.presenceMin);
+  const c = Number(s.correction);
   return {
     window: Number.isFinite(w) && w >= 1 ? Math.min(24, Math.round(w)) : TENDENCY_WINDOW,
     presenceMin: Number.isFinite(p) && p >= 0 ? Math.min(1, p) : PRESENCE_MIN,
     stat: s.stat === "moyenne" ? "moyenne" : "mediane",
+    // Correction mensuelle du biais mesuré (historisation des prévisions) :
+    // ajoutée à la provision d'habitudes, positive = provision majorée.
+    correction: Number.isFinite(c) ? Math.max(-1000, Math.min(1000, c)) : 0,
   };
 }
 
@@ -248,6 +253,10 @@ export function remainingProvision({ extras = [], expenses = [], y, m, settings 
     lines.push({ cat: t2.cat, sub: t2.sub, tendency: t2.tendency, spent, left });
     total += left;
   }
+  // Correction mensuelle du biais mesuré (voir l'historisation des
+  // prévisions, App.jsx) : la provision totale est ajustée d'un montant
+  // fixe, au plancher 0 (une provision ne peut pas être négative).
+  total = Math.max(0, total + cfg.correction);
   return { lines, total };
 }
 
