@@ -29,6 +29,8 @@ import {
   refundsTotal,
   BACKUP_STALE_DAYS,
   backupAgeDays,
+  yearSims,
+  applyScenario,
 } from "./budget.js";
 import {
   TAXONOMIE,
@@ -1662,5 +1664,70 @@ describe("backupAgeDays (rappel d'export)", () => {
 
   it("le seuil de rappel est de 30 jours", () => {
     expect(BACKUP_STALE_DAYS).toBe(30);
+  });
+});
+
+describe("yearSims (fenêtre 12 mois)", () => {
+  it("enchaîne les mois : l'ouverture d'un mois suit la fin du précédent", () => {
+    const st = migrateState({
+      soldeDepart: 1000,
+      expenses: [{ id: "e1", label: "Loyer", amount: 500, day: 1, freq: "mensuelle", cat: "logement", sub: "loyers-charges" }],
+      incomes: [{ id: "i1", label: "Salaire", amount: 2000, mode: "fixe", day: 27, cat: "revenus-travail", sub: "salaire-fixe" }],
+    });
+    const sims = yearSims(st, 2026, 10, 1000);
+    expect(sims).toHaveLength(12);
+    for (let i = 1; i < 12; i++) expect(sims[i].start).toBe(sims[i - 1].end);
+    expect(sims[1].end - sims[1].start).toBeCloseTo(1500); // +2000 − 500 chaque mois simulé
+  });
+
+  it("le mois de départ chargé suit ses flux réels, non re-simulés", () => {
+    const st = migrateState({
+      soldeDepart: 0,
+      expenses: [{ id: "e1", label: "Loyer", amount: 500, day: 1, freq: "mensuelle", cat: "logement", sub: "loyers-charges" }],
+      incomes: [],
+      extras: [{ id: "x", label: "Essence", amount: 40, y: 2026, m: 9, day: 3 }],
+    });
+    const sims = yearSims(st, 2026, 9, 100, { today: 15 });
+    expect(sims[0].end).toBeCloseTo(60); // 100 − 40 : le loyer planifié n'est pas re-simulé sur le mois réel
+    expect(sims[1].end - sims[1].start).toBeCloseTo(-500); // les mois suivants suivent le planifié
+  });
+});
+
+describe("applyScenario (simulation « et si… »)", () => {
+  const base = () =>
+    migrateState({
+      soldeDepart: 0,
+      expenses: [{ id: "e1", label: "Loyer", amount: 500, day: 1, freq: "mensuelle", cat: "logement", sub: "loyers-charges" }],
+      incomes: [
+        { id: "i1", label: "Salaire", amount: 2000, mode: "fixe", day: 27, cat: "revenus-travail", sub: "salaire-fixe" },
+        { id: "i2", label: "Prime", amount: 300, mode: "unique", day: 5, y: 2026, m: 10, cat: "revenus-travail", sub: "prime" },
+      ],
+    });
+
+  it("ajuste les revenus récurrents au pourcentage, pas les uniques", () => {
+    const out = applyScenario(base(), { salaryPct: 10 });
+    expect(out.incomes.find((i) => i.id === "i1").amount).toBeCloseTo(2200);
+    expect(out.incomes.find((i) => i.id === "i2").amount).toBeCloseTo(300);
+  });
+
+  it("scénario neutre : les données sont inchangées (mêmes références)", () => {
+    const st = base();
+    const out = applyScenario(st, {});
+    expect(out.incomes).toBe(st.incomes);
+    expect(out.expenses).toBe(st.expenses);
+  });
+
+  it("la nouvelle dépense fixe pèse sur chaque mois simulé", () => {
+    const out = applyScenario(base(), { extraExpense: { label: "Salle de sport", amount: 30, day: 5 } });
+    expect(out.expenses).toHaveLength(2);
+    const sims = yearSims(out, 2026, 10, 1000);
+    expect(sims[1].end - sims[1].start).toBeCloseTo(2000 - 500 - 30); // salaire − loyer − dépense scénario
+  });
+
+  it("salaire +10 % : le scénario enrichit chaque mois simulé de 10 % du salaire", () => {
+    const out = applyScenario(base(), { salaryPct: 10 });
+    const sims = yearSims(out, 2026, 10, 1000);
+    const baseSims = yearSims(base(), 2026, 10, 1000);
+    expect(sims[1].end - baseSims[1].end).toBeCloseTo(200); // +10 % de 2000
   });
 });

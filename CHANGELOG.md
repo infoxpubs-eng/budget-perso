@@ -5,6 +5,12 @@ Toutes les évolutions notables de ce projet seront documentées dans ce fichier
 Le format s'inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/),
 et le projet suit les principes du [Semantic Versioning](https://semver.org/lang/fr/).
 
+## [0.34.0] — 2026-11-01
+
+### Ajouté
+
+- **Simulation « et si… » 🎛️** : un bloc repliable dans l'Aperçu teste un scénario sur les 12 mois projetés **sans toucher aux données** — revenus récurrents ajustables de −20 % à +20 % (curseur) et/ou nouvelle dépense fixe mensuelle (libellé, montant, jour). Un graphique superpose la trajectoire planifiée (bleu) et la trajectoire scénario (vert pointillé), avec l'écart à 12 mois et le point bas du scénario. Les mois réellement chargés (relevés) restent sur leurs flux réels : le scénario ne change que l'avenir. Réfactorisation : la construction de la fenêtre 12 mois est extraite dans `yearSims()` (budget.js, testé) partagée entre la projection standard et le scénario (`applyScenario()`, testé).
+
 ## [0.33.0] — 2026-11-01
 
 ### Ajouté

@@ -653,6 +653,69 @@ export function realMonthSim(state, y, m, opening, { today = null } = {}) {
 }
 
 /**
+ * Fenêtre des 12 mois simulés à partir de (y, m) : le mois de départ suit les
+ * flux réels s'il est chargé (complétés en prévision jusqu'à `today`), les
+ * suivants enchaînent les écritures planifiées mois après mois. Utilisée pour
+ * la projection standard et pour la simulation « et si… » avec un état de
+ * scénario (applyScenario).
+ */
+export function yearSims(state, y, m, opening, { today = null } = {}) {
+  if (hasRealData(state, y, m)) {
+    const out = [];
+    let carry = opening;
+    let yy = y;
+    let mm = m;
+    for (let i = 0; i < 12; i++) {
+      const month = i === 0
+        ? realMonthSim(state, yy, mm, carry, { today })
+        : monthSim(state, yy, mm, carry);
+      out.push(month);
+      carry = month.end;
+      const d = new Date(yy, mm + 1, 1);
+      yy = d.getFullYear();
+      mm = d.getMonth();
+    }
+    return out;
+  }
+  return simulate(state, y, m, opening);
+}
+
+/**
+ * État modifié par un scénario « et si… » : revenus récurrents (salaire,
+ * montants fixes) ajustés d'un pourcentage, et/ou nouvelle dépense fixe
+ * mensuelle. Les revenus uniques et l'historique des occurrences ne bougent
+ * pas : le scénario projette l'avenir, il ne réécrit pas les données. Les
+ * mois réellement chargés restent sur leurs flux réels (le scénario ne
+ * s'applique qu'aux mois simulés).
+ */
+export function applyScenario(state, { salaryPct = 0, extraExpense = null } = {}) {
+  const factor = 1 + salaryPct / 100;
+  const incomes =
+    factor === 1
+      ? state.incomes
+      : state.incomes.map((i) =>
+          i.mode === "unique" ? i : { ...i, amount: Math.round(i.amount * factor * 100) / 100 }
+        );
+  const expenses =
+    extraExpense && extraExpense.amount > 0
+      ? [
+          ...state.expenses,
+          {
+            id: "what-if",
+            label: (extraExpense.label ?? "").trim() || "Dépense scénario",
+            amount: extraExpense.amount,
+            day: extraExpense.day ?? 1,
+            freq: "mensuelle",
+            cat: extraExpense.cat,
+            sub: extraExpense.sub,
+            incompressible: false,
+          },
+        ]
+      : state.expenses;
+  return { ...state, incomes, expenses };
+}
+
+/**
  * Historique des flux d'épargne RÉELS sur les mois chargés : pour chaque mois
  * (du plus ancien au plus récent), versements, retraits, flux net et cumul
  * depuis le premier mois chargé — la trajectoire de la réserve telle que le

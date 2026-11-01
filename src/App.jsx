@@ -38,6 +38,8 @@ import {
   refundsTotal,
   BACKUP_STALE_DAYS,
   backupAgeDays,
+  yearSims,
+  applyScenario,
 } from "./lib/budget.js";
 import {
   TAXONOMIE,
@@ -360,29 +362,14 @@ export default function App() {
     return { months, opening: carry };
   }, [state, anchor, start]);
 
-  const sims = useMemo(() => {
+  const sims = useMemo(
     // Mois courant chargé : réel jusqu'à aujourd'hui, écritures planifiées
     // sans occurrence en prévision pour la fin du mois ; les mois suivants
     // restent simulés par les écritures planifiées, enchaînés dessus.
-    if (hasRealData(state, start.y, start.m)) {
-      const out = [];
-      let carry = hist.opening;
-      let y = start.y;
-      let m = start.m;
-      for (let i = 0; i < 12; i++) {
-        const month = i === 0
-          ? realMonthSim(state, y, m, carry, { today: now.getDate() })
-          : monthSim(state, y, m, carry);
-        out.push(month);
-        carry = month.end;
-        const d = new Date(y, m + 1, 1);
-        y = d.getFullYear();
-        m = d.getMonth();
-      }
-      return out;
-    }
-    return simulate(state, start.y, start.m, hist.opening);
-  }, [state, start, hist.opening]);
+    // (Logique partagée avec la simulation « et si… » : voir yearSims.)
+    () => yearSims(state, start.y, start.m, hist.opening, { today: now.getDate() }),
+    [state, start, hist.opening]
+  );
 
   // ----- Sélecteur de mois : historique + 12 mois simulés + relevé au-delà -----
   const monthsAll = useMemo(() => {
@@ -821,6 +808,39 @@ export default function App() {
     ((state.extras ?? []).length > 0 || state.expenses.length > 0) &&
     (backupAge === null || backupAge >= BACKUP_STALE_DAYS);
 
+  // ----- Simulation « et si… » (what-if) -----
+  // Scénario appliqué UNIQUEMENT aux projections : revenus récurrents
+  // ajustés de salaryPct % et/ou nouvelle dépense fixe mensuelle. Les
+  // données réelles ne sont jamais modifiées ; les mois réellement chargés
+  // restent sur leurs flux réels (le scénario projette l'avenir).
+  const [whatIf, setWhatIf] = useState({ salaryPct: 0, label: "", amount: 0, day: 1 });
+  const whatIfActive = whatIf.salaryPct !== 0 || whatIf.amount > 0;
+  const scenarioState = useMemo(
+    () =>
+      whatIfActive
+        ? applyScenario(state, {
+            salaryPct: whatIf.salaryPct,
+            extraExpense: { label: whatIf.label, amount: whatIf.amount, day: whatIf.day },
+          })
+        : null,
+    [state, whatIfActive, whatIf.salaryPct, whatIf.label, whatIf.amount, whatIf.day]
+  );
+  const scenarioSims = useMemo(
+    () =>
+      scenarioState
+        ? yearSims(scenarioState, start.y, start.m, hist.opening, { today: now.getDate() })
+        : null,
+    [scenarioState, start.y, start.m, hist.opening]
+  );
+  // Comparaison côte à côte : solde fin de mois planifié vs scénario.
+  const whatIfData = scenarioSims
+    ? sims.map((s, i) => ({ label: s.label, solde: s.end, scenario: scenarioSims[i].end }))
+    : [];
+  const whatIfDelta12 = scenarioSims ? scenarioSims[11].end - sims[11].end : 0;
+  const whatIfMin = scenarioSims
+    ? scenarioSims.reduce((acc, s) => (s.min < acc.min ? s : acc), scenarioSims[0])
+    : null;
+
   const tabs = [
     { id: "apercu", label: "Aperçu" },
     { id: "depenses", label: "Dépenses" },
@@ -1117,6 +1137,88 @@ export default function App() {
                 </div>
               </Card>
             )}
+
+            <Card
+              title={
+                <div className="flex flex-1 flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-semibold">🎛️ Simulation « et si… »</h2>
+                  {whatIfActive && (
+                    <span className="text-xs font-normal text-emerald-600">scénario actif — vos données ne sont pas modifiées</span>
+                  )}
+                </div>
+              }
+            >
+              <p className="mb-3 text-xs text-slate-500">
+                Testez un scénario sur les 12 mois projetés sans toucher à vos données : revenus récurrents ajustés
+                et/ou nouvelle dépense fixe. Les mois réellement chargés (relevés) restent sur leurs flux réels —
+                le scénario ne change que l'avenir.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Field label={"Revenus récurrents : " + (whatIf.salaryPct > 0 ? "+" : "") + whatIf.salaryPct + " %"}>
+                  <input
+                    type="range"
+                    min={-20}
+                    max={20}
+                    step={1}
+                    value={whatIf.salaryPct}
+                    onChange={(e) => setWhatIf({ ...whatIf, salaryPct: Number(e.target.value) })}
+                    className="mt-2 w-full accent-indigo-600"
+                  />
+                  <div className="flex justify-between text-xs text-slate-400">
+                    <span>−20 %</span>
+                    <span>+20 %</span>
+                  </div>
+                </Field>
+                <Field label="Nouvelle dépense : libellé">
+                  <input
+                    className={inputCls}
+                    value={whatIf.label}
+                    onChange={(e) => setWhatIf({ ...whatIf, label: e.target.value })}
+                    placeholder="Ex. Salle de sport"
+                  />
+                </Field>
+                <Field label="Montant mensuel (€)">
+                  <NumInput value={whatIf.amount} onChange={(n) => setWhatIf({ ...whatIf, amount: n })} />
+                </Field>
+                <Field label="Jour du mois (1–31)">
+                  <NumInput value={whatIf.day} onChange={(n) => setWhatIf({ ...whatIf, day: n })} />
+                </Field>
+              </div>
+              {whatIfActive && (
+                <>
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={whatIfData} margin={{ top: 10, right: 16, bottom: 4, left: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(l) => String(l).slice(0, 3)} />
+                        <YAxis tick={{ fontSize: 12, fill: "#64748b" }} tickFormatter={(v) => Math.round(v / 100) / 10 + "k€"} width={48} />
+                        <Tooltip />
+                        <ReferenceLine y={0} stroke="#f43f5e" strokeDasharray="4 4" />
+                        <Line type="monotone" dataKey="solde" stroke="#6366f1" strokeWidth={2} dot={false} name="Planifié" />
+                        <Line type="monotone" dataKey="scenario" stroke="#10b981" strokeWidth={2} strokeDasharray="5 4" dot={false} name="Scénario" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Écart du scénario à 12 mois :{" "}
+                    <span className={"font-semibold " + (whatIfDelta12 >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                      {whatIfDelta12 >= 0 ? "+" : "−"} {fmt(Math.abs(whatIfDelta12))}
+                    </span>
+                    {" · point bas du scénario : "}
+                    <span className="font-medium text-slate-700">{fmt(whatIfMin.min)}</span>{" "}
+                    ({MONTHS[whatIfMin.m].toLowerCase()} {whatIfMin.y})
+                  </p>
+                </>
+              )}
+              <div className="mt-3 flex gap-2">
+                <button
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+                  onClick={() => setWhatIf({ salaryPct: 0, label: "", amount: 0, day: 1 })}
+                >
+                  ↺ Réinitialiser le scénario
+                </button>
+              </div>
+            </Card>
 
             <Card
               title={
